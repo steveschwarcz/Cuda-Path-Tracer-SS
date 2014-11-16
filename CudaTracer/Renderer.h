@@ -10,7 +10,6 @@ using glm::vec3;
 using glm::dot;
 
 //ray
-__device__
 struct Ray
 {
 	vec3 origin;
@@ -23,16 +22,16 @@ struct Ray
 };
 
 //Camera
-__device__
 struct Camera
 {
 	float zNear;
 	float zFar;
 	float fieldOfView;
+	vec3 position;
 
 	__device__ __host__
 	Camera() :
-		zNear(-0.1f), zFar(-100.0f), fieldOfView(float(M_PI) / 2.0f) {};
+		zNear(-0.1f), zFar(-100.0f), fieldOfView(float(M_PI) / 2.0f), position(0,0,0) {};
 };
 
 //Point Light
@@ -46,7 +45,7 @@ struct PointLight
 		position(position), power(power) {}
 };
 
-__device__
+
 struct SurfaceElement {
 	vec3 point;
 	vec3 normal;

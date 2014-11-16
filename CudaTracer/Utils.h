@@ -99,13 +99,16 @@ struct GPUAnimBitmap
 		clickDrag = f;
 	}
 
-	void anim_and_exit(void(*f)(uchar4*, void*, int), void(*e)(void*)) {
+	void anim_and_exit(
+		void(*f)(uchar4*, void*, int), 
+		void(*e)(void*), 
+		void(*k)(unsigned char key, int x, int y)) {
 		GPUAnimBitmap**   bitmap = get_bitmap_ptr();
 		*bitmap = this;
 		fAnim = f;
 		animExit = e;
 
-		glutKeyboardFunc(Key);
+		glutKeyboardFunc(k);
 		glutDisplayFunc(Draw); 
 		glutReshapeFunc(resize);
 		if (clickDrag != NULL)
