@@ -153,11 +153,14 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="kernel.cu" />
+    <CudaCompile Include="CudaTracer.cu" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CudaTracer.h" />
+    <ClInclude Include="Primitives.h" />
     <ClInclude Include="Renderer.h" />
-    <ClInclude Include="Utils.h" />
+    <ClInclude Include="CudaUtils.h" />
+    <ClInclude Include="RendererUtils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

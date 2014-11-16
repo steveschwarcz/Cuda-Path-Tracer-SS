@@ -6,32 +6,15 @@
 #include <gl/GL.h>
 #include <gl/freeglut.h>
 #include "cuda_gl_interop.h"
-#include "utils.h"
+#include "CudaUtils.h"
 #include <math.h>
-#include "Renderer.h"
+#include "Primitives.h"
+#include "CudaTracer.h"
 #pragma comment(lib, "glew32.lib")
 
 //TODO: These ought to be done differently
 
-#define numSpheres 20
-#define rnd(x) (x * rand() / RAND_MAX)
-
-#define inverse255 0.00392156862f
-
-void generateFrame(uchar4 *pixels, void*, int ticks);
-void Key(unsigned char key, int x, int y);
-__device__
-Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera);
-
-__device__
-char3 shade(const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o);
-
-Camera *c;
-PointLight *l;
-Ray* rays;
-Sphere *s;
-
-__global__ void kernel(uchar4 *ptr, Sphere* spheres, Camera *camera, PointLight* pointLight, Ray* rays)
+__global__ void kernel(uchar4 *ptr, Sphere* spheres, int numSpheres, Camera *camera, PointLight* pointLight, Material* materials, Ray* rays)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -57,7 +40,7 @@ __global__ void kernel(uchar4 *ptr, Sphere* spheres, Camera *camera, PointLight*
 	if (intersection)
 	{	
 		//intersection found, calculate direct light
-		radiance = shade(surfel, pointLight->position, pointLight->power, tempRay.direction);
+		radiance = shade(surfel, pointLight->position, pointLight->power, tempRay.direction, materials);
 	}
 	else
 	{
@@ -94,16 +77,11 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera)
 		1.0f)
 		* camera->zNear;
 
-
-	//	AffineTransformation trans = Eigen::AngleAxisf(M_PI / 4, Vector3::UnitX()).matrix()
-
-//	return Ray(position(), (m_rotation.matrix() * start).normalized());// -position);
-
-	return Ray(camera->position, glm::normalize(start));
+	return Ray(camera->position, glm::normalize(camera->rotation * start));
 }
 
 __device__
-char3 shade(const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o)
+char3 shade(const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* materials)
 {
 	vec3 w_i;
 	float distance2;
@@ -131,10 +109,11 @@ char3 shade(const SurfaceElement& surfel, const vec3& lightPoint, const vec3& li
 //		}
 
 		float cosI = fmax(0.0f, dot(surfel.normal, w_i));
+		Material mat = materials[surfel.materialIdx];
 
-		radiance.x = 255 * (cosI * L_i.x * 1.0 / M_PI);
-		radiance.y = 255 * (cosI * L_i.y * 1.0 / M_PI);
-		radiance.z = 255 * (cosI * L_i.z * 1.0 / M_PI);
+		radiance.x = 255 * (cosI * L_i.x * mat.diffuseColor.r / M_PI);
+		radiance.y = 255 * (cosI * L_i.y * mat.diffuseColor.g / M_PI);
+		radiance.z = 255 * (cosI * L_i.z * mat.diffuseColor.b / M_PI);
 
 		//scatter the light
 		return radiance;
@@ -143,59 +122,97 @@ char3 shade(const SurfaceElement& surfel, const vec3& lightPoint, const vec3& li
 //	}
 }
 
-void generateFrame(uchar4 *pixels, void*, int ticks)
+bool lineOfSight(const vec3& point0, const vec3& point1, vec3& w_i, float& distance2)
 {
+	
+}
 
+void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
+{
+	RendererData *data = (RendererData *)dataBlock;
 	
 
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
-	kernel <<<grids, threads >>>(pixels, s, c, l, rays);
+	kernel <<< grids, threads >>>(pixels, data->spheres, data->numSpheres, data->camera, data->light, data->materials, data->rays);
 }
 
 int main(int argc, char *argv[])
 {
+	int numSpheres = 20;
+	int numMaterials = 3;
 
-	GPUAnimBitmap bitmap(DIM, DIM, NULL);
+	Camera *camera;
+	PointLight *light;
+	Ray* rays;
+	Sphere *spheres;
+	Triangle *triangles;
+	Material *materials;
+
+	//initialize bitmap and data
+	RendererData *data = (RendererData*)malloc(sizeof(RendererData));
+	GPUAnimBitmap bitmap(DIM, DIM, data);
 
 	//allocate GPU pointers
-	CUDA_ERROR_HANDLE(cudaMalloc((void**)&c,
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&camera,
 		sizeof(Camera)));
 
-	CUDA_ERROR_HANDLE(cudaMalloc((void**)&l,
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&light,
 		sizeof(PointLight)));
 
-	CUDA_ERROR_HANDLE(cudaMalloc((void**)&s,
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&spheres,
 		sizeof(Sphere)* numSpheres));
 
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&rays,
 		sizeof(Ray)* DIM * DIM));
+
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&materials,
+		sizeof(Material) * numMaterials));
 	
+	//initialize values
 	Sphere *temp_s;
 	Camera temp_c = Camera();
-	PointLight temp_l = PointLight(vec3(0, 5, 0), vec3(200, 200, 200));
+	PointLight temp_l = PointLight(vec3(0, 5, 0), vec3(400, 400, 400));
+	Material *temp_m;
 
-	temp_s = (Sphere*)malloc(sizeof(Sphere)* numSpheres);
+	temp_m = (Material*)malloc(sizeof(Material)* numMaterials);
+
+	temp_m[0] = Material(vec3(0, 1.0f, 1.0f));
+	temp_m[1] = Material(vec3(1.0f, 1.0f, 1.0f));
+	temp_m[2] = Material(vec3(1.0f, 0.0f, 0.0f));
+
+	temp_s = (Sphere*)malloc(sizeof(Sphere) * numSpheres);
 	for (int i = 0; i < numSpheres; i++)
 	{
 		temp_s[i].position = vec3(rnd(6.0f) - 3.0f, rnd(6.0f) - 3.0f, rnd(5.0f) - 8.0f);
 		temp_s[i].radius = rnd(0.5f) + 0.5f;
+		temp_s[i].materialIdx = i % numMaterials;
 	}
 
 
-	CUDA_ERROR_HANDLE(cudaMemcpy(s, temp_s, sizeof(Sphere)* numSpheres, cudaMemcpyHostToDevice));
-	CUDA_ERROR_HANDLE(cudaMemcpy(c, &temp_c, sizeof(Camera), cudaMemcpyHostToDevice));
-	CUDA_ERROR_HANDLE(cudaMemcpy(l, &temp_l, sizeof(PointLight), cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(spheres, temp_s, sizeof(Sphere)* numSpheres, cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(camera, &temp_c, sizeof(Camera), cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(light, &temp_l, sizeof(PointLight), cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(materials, temp_m, sizeof(Material)* numMaterials, cudaMemcpyHostToDevice));
 
+	//put values in a data block
+	data->camera = camera;
+	data->light = light;
+	data->spheres = spheres;
+	data->rays = rays;
+	data->numSpheres = numSpheres;
+	data->materials = materials;
 
 	bitmap.anim_and_exit((void(*)(uchar4*, void*, int))generateFrame, NULL, (void(*)(unsigned char, int, int))Key);
 
-	CUDA_ERROR_HANDLE(cudaFree(c));
-	CUDA_ERROR_HANDLE(cudaFree(l));
-	CUDA_ERROR_HANDLE(cudaFree(s));
+	//free
+	CUDA_ERROR_HANDLE(cudaFree(camera));
+	CUDA_ERROR_HANDLE(cudaFree(light));
+	CUDA_ERROR_HANDLE(cudaFree(spheres));
 	CUDA_ERROR_HANDLE(cudaFree(rays));
-
+	CUDA_ERROR_HANDLE(cudaFree(materials));
 	free(temp_s);
+	free(data);
 
 	return 0;
 }
@@ -227,16 +244,31 @@ __global__ void moveCamera(Camera *camera, unsigned char key)
 					camera->position.x += .1f;
 					break;
 		}
+		case 32:
+		{
+				   //up (space)
+				   camera->position.y += .1f;
+				   break;
+		}
+		case 99:
+		{
+				   //down (c)
+				   camera->position.y -= .1f;
+				   break;
+		}
+
 	}
 }
 
 
 // static method used for glut callbacks
 void Key(unsigned char key, int x, int y) {
+
+	GPUAnimBitmap*   bitmap = *(GPUAnimBitmap::get_bitmap_ptr());
+
 	switch (key) {
 		case 27:
 		{
-			   GPUAnimBitmap*   bitmap = *(GPUAnimBitmap::get_bitmap_ptr());
 			   if (bitmap->animExit)
 				   bitmap->animExit(bitmap->dataBlock);
 			   bitmap->free_resources();
@@ -244,5 +276,5 @@ void Key(unsigned char key, int x, int y) {
 		}
 	}
 
-	moveCamera <<< 1, 1 >>>(c, key);
+	moveCamera <<< 1, 1 >>>(((RendererData*)bitmap->dataBlock)->camera, key);
 }
