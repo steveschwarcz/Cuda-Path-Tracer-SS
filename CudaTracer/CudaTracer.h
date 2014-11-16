@@ -9,7 +9,10 @@ __device__
 Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera);
 
 __device__
-char3 shade(const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* material);
+char3 shade(Sphere* spheres, const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* material);
+
+__device__
+bool lineOfSight(Sphere* spheres, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2);
 
 struct RendererData
 {

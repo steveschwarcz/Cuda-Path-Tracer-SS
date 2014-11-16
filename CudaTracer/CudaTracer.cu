@@ -40,7 +40,7 @@ __global__ void kernel(uchar4 *ptr, Sphere* spheres, int numSpheres, Camera *cam
 	if (intersection)
 	{	
 		//intersection found, calculate direct light
-		radiance = shade(surfel, pointLight->position, pointLight->power, tempRay.direction, materials);
+		radiance = shade(spheres, surfel, pointLight->position, pointLight->power, tempRay.direction, materials);
 	}
 	else
 	{
@@ -81,19 +81,14 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera)
 }
 
 __device__
-char3 shade(const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* materials)
+char3 shade(Sphere* spheres, const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* materials)
 {
 	vec3 w_i;
 	float distance2;
 	char3 radiance;
-	const vec3 offset = lightPoint - surfel.point;
 
-	distance2 = dot(offset, offset);
-
-	w_i = offset / sqrt(distance2);
-
-//	if (lineOfSight(surfel.shader().position, lightPoint, w_i, distance2))
-//	{
+	if (lineOfSight(spheres, surfel.point, lightPoint, w_i, distance2))
+	{
 		const vec3& L_i = lightPower / float(4 * M_PI * distance2);
 
 //		Radiance3 bsdfResult(0, 0, 0);
@@ -117,14 +112,43 @@ char3 shade(const SurfaceElement& surfel, const vec3& lightPoint, const vec3& li
 
 		//scatter the light
 		return radiance;
+	}
 
+	radiance.x = 0;
+	radiance.y = 0;
+	radiance.z = 0;
 
-//	}
+	return radiance;
 }
 
-bool lineOfSight(const vec3& point0, const vec3& point1, vec3& w_i, float& distance2)
+__device__
+bool lineOfSight(Sphere* spheres, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2)
 {
-	
+	const vec3 offset = point1 - point0;
+	distance2 = dot(offset, offset);
+	float distance = sqrt(distance2);
+	w_i = offset / distance;
+
+	const Ray losRay(point0 + (1e-3f * w_i), w_i);
+
+	//shorten distance.
+//	distance -= RAY_BUMP_EPSILON;
+	distance -= 1e-3f;
+
+	//loop through all primitives, seeing if any intersections occur
+	SurfaceElement surfel;
+	bool visible = true;
+
+	//FIXME: SHOULD NOT BE HARDCODED
+	for (int i = 0; i < 20; i++)
+	{
+		if (spheres[i].intersectRay(losRay, distance, surfel))
+		{
+			visible = false;
+		}
+	}
+
+	return visible;
 }
 
 void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
@@ -172,7 +196,7 @@ int main(int argc, char *argv[])
 	//initialize values
 	Sphere *temp_s;
 	Camera temp_c = Camera();
-	PointLight temp_l = PointLight(vec3(0, 5, 0), vec3(400, 400, 400));
+	PointLight temp_l = PointLight(vec3(0, 5.5f, 0), vec3(400, 400, 400));
 	Material *temp_m;
 
 	temp_m = (Material*)malloc(sizeof(Material)* numMaterials);
@@ -244,15 +268,15 @@ __global__ void moveCamera(Camera *camera, unsigned char key)
 					camera->position.x += .1f;
 					break;
 		}
-		case 32:
+		case 113:
 		{
-				   //up (space)
+				   //up (q)
 				   camera->position.y += .1f;
 				   break;
 		}
-		case 99:
+		case 101:
 		{
-				   //down (c)
+				   //down (e)
 				   camera->position.y -= .1f;
 				   break;
 		}
