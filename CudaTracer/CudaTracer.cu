@@ -2,43 +2,77 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <stdio.h>
-#include <stdlib.h>
+#include <time.h>
 #include <gl/glew.h>
 #include <gl/GL.h>
 #include <gl/freeglut.h>
 #include "cuda_gl_interop.h"
+#include <curand_kernel.h>
 #include "CudaUtils.h"
-#include <math.h>
 #include "Primitives.h"
 #include "CudaTracer.h"
 #pragma comment(lib, "glew32.lib")
 
 //TODO: These ought to be done differently
 
-__global__ void kernel(uchar4 *pixels, RendererData data)
+//Initialize curand states
+__global__ void curandSetupKernel(curandState *state)
+{
+	int id = threadIdx.x + blockIdx.x * blockDim.x;
+	/* Each thread gets same seed, a different sequence number, no offset */ 
+	curand_init(clock64(), id, 0, &state[id]);
+}
+
+__global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, int iterations)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
 
-	//create the ray
-	Ray tempRay = computeEyeRay(x, y, DIM, DIM, data.camera);
+	Ray ray(true);
 
-	//loop through spheres, finding intersection
+	if (iterations == 0)
+	{
+		//create the ray if this a new render
+		ray = computeEyeRay(x, y, DIM, DIM, data.camera);
+
+		ray.pixelOffset = offset;
+	}
+	else
+	{
+		//use the existing ray
+		ray = data.rays[offset];
+	}
+
+	//before continuing, be sure that the ray is still active
+	if (!ray.active || iterations == 9)
+	{
+		vec3 radiance = ray.directLightColor + ray.indirectLightColor;
+
+		uchar4 pixel;
+
+		//access uchar4
+		pixel.x = static_cast<unsigned char>(glm::clamp<float>(255 * radiance.x, 0.f, 255.f));
+		pixel.y = static_cast<unsigned char>(glm::clamp<float>(255 * radiance.y, 0.f, 255.f));
+		pixel.z = static_cast<unsigned char>(glm::clamp<float>(255 * radiance.z, 0.f, 255.f));
+		pixel.w = 255;
+
+		pixels[ray.pixelOffset] = pixel;
+
+		return;
+	}
+
 	float distance = INFINITY;
 	SurfaceElement surfel;
 	char intersection = 0;
-	short3 radiance;
-	radiance.x = 0;
-	radiance.y = 0;
-	radiance.z = 0;
 
 	//TODO: Refactor into reusable way to find an intersection
+	//loop through spheres, finding intersection
 	for (size_t i = 0; i < data.numSpheres; i++)
 	{
 		Sphere sphere = data.spheres[i];
 
-		if (sphere.intersectRay(tempRay, distance, surfel))
+		if (sphere.intersectRay(ray, distance, surfel))
 		{
 			intersection = 1;
 		}
@@ -48,36 +82,106 @@ __global__ void kernel(uchar4 *pixels, RendererData data)
 	{
 		Triangle triangle = data.triangles[i];
 
-		if (triangle.intersectRay(tempRay, distance, surfel))
+		if (triangle.intersectRay(ray, distance, surfel))
 		{
 			intersection = 1;
 		}
 	}
 
+
 	if (intersection)
-	{	
-		//TODO
+	{
+		//intersection occured
+
+		bool inside = false;
+
+		//find cos of incidence
+		float cosI = dot(-ray.direction, surfel.normal);
+
+		//if cosI is positive, ray is inside of primitive 
+		if (cosI < 0.0f)
+		{
+			inside = true;
+		}
+
+
+
+		//--------------------------
+		//		Direct Light
+		//--------------------------
+			//get material
 		Material material = data.materials[surfel.materialIdx];
 
-		//intersection found, calculate direct light
-		radiance = shade(data, surfel, material, tempRay.direction);
+		if (iterations == 0) {
+			//emit if material is emitter
+			ray.directLightColor += material.emmitance;
+
+			//calculate direct light
+			short3 directRadiance;
+			if (!inside) {
+				ray.directLightColor += shade(data, surfel, material);
+			}
+		}
+
+
+		//--------------------------
+		//		Scattering
+		//--------------------------
+		//get curand state
+		curandState localState = data.curandStates[offset];
+
+		//both indexes of refraction, n1 / n2, and sin T squared
+		float n1, n2, n, sinT2;
+
+		//compute values that will be needed later
+		computeSinT2AndRefractiveIndexes(material.indexOfRefraction, cosI, sinT2, n1, n2, n);
+
+		//compute fresnel
+		const float fresnelReflective = computeFresnelForReflectance(cosI, sinT2, n1, n2, n);
+
+		float r = curand_uniform(&localState);
+
+		//first check for diffuse indirect light
+		if (material.diffAvg > 0.0f)
+		{
+			//diffuse reflection
+			r -= material.diffAvg;
+
+			if (r < 0.0f)
+			{
+				if (iterations == 0) {
+					ray.indirectLightColor = vec3(1, 1, 1);
+				}
+
+				vec3 L(0, 0, 0);
+				vec3 w_o = cosHemiRandom(surfel.normal, localState);
+
+				ray.origin = surfel.point + RAY_BUMP_EPSILON * w_o;
+				ray.direction = w_o;
+
+				ray.indirectLightColor.x *= .1f * material.diffuseColor.x;
+				ray.indirectLightColor.y *= .1f * material.diffuseColor.y;
+				ray.indirectLightColor.z *= .1f * material.diffuseColor.z;
+			}
+			else {
+				ray.active = false;
+			}
+		}
 	}
 	else
 	{
-		radiance.x = data.defaultColor.x;
-		radiance.y = data.defaultColor.y;
-		radiance.z = data.defaultColor.z;
-		tempRay.alive = 0;
+		if (iterations == 0) {
+			ray.directLightColor = data.defaultColor;
+		}
+		else {
+			ray.indirectLightColor *= data.defaultColor;
+		}
+
+		ray.active = false;
 	}
 
 	//save the ray
-	data.rays[offset] = tempRay;
-
-	//access uchar4
-	pixels[offset].x = static_cast<unsigned char>(glm::clamp<short>(radiance.x, 0, 255));
-	pixels[offset].y = static_cast<unsigned char>(glm::clamp<short>(radiance.y, 0, 255));
-	pixels[offset].z = static_cast<unsigned char>(glm::clamp<short>(radiance.z, 0, 255));
-	pixels[offset].w = 255;
+	data.rays[offset] = ray;
 }
 
 __device__ 
@@ -101,14 +205,11 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera)
 }
 
 __device__
-short3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material, const vec3& w_o)
+vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material)
 {
 	vec3 w_i;
 	float distance2;
-	short3 radiance;		//result may surpass 255, so an int3 is used
-	radiance.x = 0;
-	radiance.y = 0;
-	radiance.z = 0;
+	vec3 radiance = vec3(0, 0, 0);
 
 
 	//TODO: loop through all lights
@@ -122,9 +223,9 @@ short3 shade(const RendererData& data, const SurfaceElement& surfel, const Mater
 
 			float cosI = fmax(0.0f, dot(surfel.normal, w_i));
 
-			radiance.x += 255 * (cosI * L_i.r * material.diffuseColor.r * material.diffAvg / M_PI);
-			radiance.y += 255 * (cosI * L_i.g * material.diffuseColor.g * material.diffAvg / M_PI);
-			radiance.z += 255 * (cosI * L_i.b * material.diffuseColor.b * material.diffAvg / M_PI);
+			radiance.x += cosI * L_i.r * material.diffuseColor.r * material.diffAvg * INVERSE_PI;
+			radiance.y += cosI * L_i.g * material.diffuseColor.g * material.diffAvg * INVERSE_PI;
+			radiance.z += cosI * L_i.b * material.diffuseColor.b * material.diffAvg * INVERSE_PI;
 		}
 	}
 
@@ -172,24 +273,117 @@ bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point
 	return true;
 }
 
+float computeFresnelForReflectance(const float cosI, const float sinT2, const float n1, const float n2, const float n)
+{
+	//check for TIR
+	if (sinT2 > 1.0f)
+	{
+		return 1.0;
+	}
+
+	const float cosT = sqrt(1.0f - sinT2);
+
+	const float r_s = (n1 * cosI - n2 * cosT) / (n1 * cosI + n2 * cosT);
+	const float r_p = (n2 * cosI - n1 * cosT) / (n2 * cosI + n1 * cosT);
+
+	return (r_s * r_s + r_p * r_p) * 0.5f;
+}
+
+void computeSinT2AndRefractiveIndexes(const float refrIndex, float& cosI, float& sinT2, float& n1, float& n2, float& n)
+{
+	if (cosI > 0)
+	{
+		n2 = refrIndex;
+		n1 = 1.0f;
+	}
+	else
+	{
+		//make sure cos I positive
+		cosI = -cosI;
+
+		n1 = refrIndex;
+		n2 = 1.0f;
+	}
+
+	n = n1 / n2;
+
+	sinT2 = n * n * (1.0f - cosI * cosI);
+}
+
+Ray reflRay(const vec3& incident, const SurfaceElement& surfel, const float cosI)
+{
+	vec3 w_o = incident - 2 * (-cosI) * surfel.normal;
+
+	return Ray(surfel.point + (w_o * RAY_BUMP_EPSILON), w_o);
+}
+
+Ray refrRay(const vec3& incident, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n)
+{
+	//check for TIR
+	if (sinT2 > 1.0f)
+	{
+		return Ray(false);
+	}
+
+	const float cosT = sqrt(1.0f - sinT2);
+
+	vec3 w_o = normalize(n * incident + (n * cosI - cosT) * surfel.normal);
+
+	return Ray(surfel.point + (w_o * RAY_BUMP_EPSILON), w_o);
+}
+
+const vec3 cosHemiRandom(vec3 const& normal, curandState& state)
+{
+	float theta = curand_uniform(&state) * 2 * M_PI;
+	float s = curand_uniform(&state);
+	float y = sqrt(s);
+	float r = sqrt(1 - y * y);
+
+	vec3 sample(r * cos(theta), y, r * sin(theta));
+	quat rot = rotateVectorToVector(vec3(0, 1, 0), normal);
+
+	return rot * sample;
+}
+
+const vec3 cosHemiRandomPhong(const vec3& w_o, float exponent, curandState& state)
+{
+	float theta = curand_uniform(&state) * 2 * M_PI;
+	float s = curand_uniform(&state);
+	float y = pow(s, 1 / (exponent + 1));
+	float r = sqrt(1 - y * y);
+
+	vec3 sample(r * cos(theta), y, r * sin(theta));
+	quat rot = rotateVectorToVector(vec3(0, 1, 0), w_o);
+
+	return rot * sample;
+}
+
+const quat rotateVectorToVector(const vec3& source, const vec3& target)
+{
+	vec3 axis = cross(source, target);
+	quat rotation = quat(1.0f + dot(source, target), axis.x, axis.y, axis.z);
+	return normalize(rotation);
+}
+
 void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 {
 	RendererData *data = (RendererData *)dataBlock;
-	
+
+	//TODO: Implement a way to reset ticks when moving
 
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
-	kernel <<< grids, threads >>>(pixels, *data);
+
+	for (unsigned int i = 0; i < 10; i++) {
+		pathTraceKernel <<< grids, threads >>>(pixels, *data, ticks, i);
+	}
 }
 
 int main(int argc, char *argv[])
 {
 	Scene scene;
 
-	uchar3 defaultColor;
-	defaultColor.x = 100;
-	defaultColor.y = 100;
-	defaultColor.z = 100;
+	vec3 defaultColor(100.f / 255.f, 100.f / 255.f, 100.f / 255.f);
 
 	buildScene(scene);
 
@@ -200,6 +394,7 @@ int main(int argc, char *argv[])
 	Sphere *spheres;
 	Triangle *triangles;
 	Material *materials;
+	curandState* curandStates;
 
 	//initialize bitmap and data
 	RendererData *data = new RendererData();
@@ -226,6 +421,9 @@ int main(int argc, char *argv[])
 
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&rays,
 		sizeof(Ray)* DIM * DIM));
+
+	CUDA_ERROR_HANDLE(cudaMalloc(&curandStates, 
+		sizeof(curandState)* DIM *DIM));
 	
 	//initialize values
 	Camera temp_c = Camera();
@@ -251,6 +449,11 @@ int main(int argc, char *argv[])
 	data->rays = rays;
 	data->materials = materials;
 	data->defaultColor = defaultColor;
+	data->curandStates = curandStates;
+
+	dim3 grids(DIM / 16, DIM / 16);
+	dim3 threads(16, 16);
+	curandSetupKernel << < grids, threads >> > (curandStates);
 
 
 
@@ -264,6 +467,7 @@ int main(int argc, char *argv[])
 	CUDA_ERROR_HANDLE(cudaFree(triangles));
 	CUDA_ERROR_HANDLE(cudaFree(rays));
 	CUDA_ERROR_HANDLE(cudaFree(materials));
+	CUDA_ERROR_HANDLE(cudaFree(curandStates));
 	
 	delete data;
 
@@ -271,10 +475,10 @@ int main(int argc, char *argv[])
 }
 
 void buildScene(Scene& scene) {
-	float power = 800;
+	float power = 300;
 
 	//add point light
-	scene.pointLightsVec.push_back(PointLight(vec3(-2, 4.0f, 0), vec3(power, power, power)));
+	scene.pointLightsVec.push_back(PointLight(vec3(0, 0.0f, -2.5), vec3(power, power, power)));
 //	scene.pointLightsVec.push_back(PointLight(vec3(2, 1.0f, 0), vec3(power, power, power)));
 
 	//add Spheres
@@ -290,7 +494,7 @@ void addRandomSpheres(Scene& scene, const size_t numSpheres)
 
 	//add matrials
 	scene.materialsVec.push_back(Material(vec3(0, 1.0f, 1.0f), 0.9f));
-	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.9f));
+	scene.materialsVec.push_back(Material(vec3(0.0f, 0.0f, 1.0f), 0.9f));
 	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
 
 	for (int i = 0; i < numSpheres; i++)

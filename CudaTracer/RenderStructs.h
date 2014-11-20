@@ -25,11 +25,18 @@ struct Ray
 {
 	vec3 origin;
 	vec3 direction;
-	char alive;
+	vec3 directLightColor;
+	vec3 indirectLightColor;
+	int pixelOffset;
+	bool active;
 
 	__device__
 	Ray(vec3 origin, vec3 direction) :
-		direction(direction), origin(origin), alive(1) {};
+	direction(direction), origin(origin), active(true), directLightColor(0, 0, 0), indirectLightColor(0, 0, 0) {};
+
+	__device__
+	explicit Ray(bool alive) :
+		active(alive) {};
 };
 
 //Camera

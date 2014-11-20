@@ -2,7 +2,8 @@
 
 #define rnd(x) (x * rand() / RAND_MAX)
 
-#define inverse255 0.00392156862f
+#define INVERSE_255 0.00392156862f
+#define INVERSE_PI 0.31830988618f
 
 #define RAY_BUMP_EPSILON 1e-4f
 
@@ -12,6 +13,7 @@
 /// </summary>
 struct RendererData
 {
+	vec3 defaultColor;
 	Camera *camera;
 	PointLight *pointLights;
 	size_t numPointLights;
@@ -23,7 +25,7 @@ struct RendererData
 	Triangle *triangles;
 	size_t numTriangles;
 	Material* materials;
-	uchar3 defaultColor;
+	curandState* curandStates;
 };
 
 void buildScene(Scene& scene);
@@ -37,7 +39,28 @@ __device__
 Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera);
 
 __device__
-short3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material, const vec3& w_o);
+vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material);
 
 __device__
 bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2);
+
+__device__
+float computeFresnelForReflectance(const float cosI, const float sinT2, const float n1, const float n2, const float n);
+
+__device__
+void computeSinT2AndRefractiveIndexes(const float refrIndex, float& cosI, float& sinT2, float& n1, float& n2, float& n);
+
+__device__
+Ray reflRay(const vec3& incident, const SurfaceElement& surfel, const float cosI);
+
+__device__
+Ray refrRay(const vec3& incident, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n);
+
+__device__
+const vec3 cosHemiRandom(vec3 const& normal, curandState& state);
+
+__device__
+const vec3 cosHemiRandomPhong(const vec3& w_o, float exponent, curandState& state);
+
+__device__
+const quat rotateVectorToVector(const vec3& source, const vec3& target);
