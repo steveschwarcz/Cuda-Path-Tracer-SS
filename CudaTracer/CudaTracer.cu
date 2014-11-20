@@ -29,9 +29,17 @@ __global__ void kernel(uchar4 *ptr, RendererData data)
 	char intersection = 0;
 	char3 radiance;
 
-	for (int i = 0; i < data.numSpheres; i++)
+	for (unsigned int i = 0; i < data.numSpheres; i++)
 	{
 		if (data.spheres[i].intersectRay(tempRay, distance, surfel))
+		{
+			intersection = 1;
+		}
+	}
+
+	for (unsigned int i = 0; i < data.numTriangles; i++)
+	{
+		if (data.triangles[i].intersectRay(tempRay, distance, surfel))
 		{
 			intersection = 1;
 		}
@@ -40,13 +48,13 @@ __global__ void kernel(uchar4 *ptr, RendererData data)
 	if (intersection)
 	{	
 		//intersection found, calculate direct light
-		radiance = shade(data.spheres, surfel, data.pLights->position, data.pLights->power, tempRay.direction, data.materials);
+		radiance = shade(data, surfel, data.pLights->position, data.pLights->power, tempRay.direction, data.materials);
 	}
 	else
 	{
-		radiance.x = 0;
-		radiance.y = 0;
-		radiance.z = 0;
+		radiance.x = 100;
+		radiance.y = 100;
+		radiance.z = 100;
 		tempRay.alive = 0;
 	}
 
@@ -81,13 +89,13 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera)
 }
 
 __device__
-char3 shade(Sphere* spheres, const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* materials)
+char3 shade(const RendererData& data, const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* materials)
 {
 	vec3 w_i;
 	float distance2;
 	char3 radiance;
 
-	if (lineOfSight(spheres, surfel.point, lightPoint, w_i, distance2))
+	if (lineOfSight(data, surfel.point, lightPoint, w_i, distance2))
 	{
 		const vec3& L_i = lightPower / float(4 * M_PI * distance2);
 
@@ -122,33 +130,40 @@ char3 shade(Sphere* spheres, const SurfaceElement& surfel, const vec3& lightPoin
 }
 
 __device__
-bool lineOfSight(Sphere* spheres, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2)
+bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2)
 {
 	const vec3 offset = point1 - point0;
 	distance2 = dot(offset, offset);
 	float distance = sqrt(distance2);
+
 	w_i = offset / distance;
 
-	const Ray losRay(point0 + (1e-3f * w_i), w_i);
+	const Ray losRay(point0 + (RAY_BUMP_EPSILON * w_i), w_i);
 
 	//shorten distance.
-//	distance -= RAY_BUMP_EPSILON;
-	distance -= 1e-3f;
+	distance -= RAY_BUMP_EPSILON;
 
 	//loop through all primitives, seeing if any intersections occur
 	SurfaceElement surfel;
-	bool visible = true;
 
-	//FIXME: SHOULD NOT BE HARDCODED
-	for (int i = 0; i < 20; i++)
+	//TODO: More robust implementation
+	for (unsigned int i = 0; i < data.numSpheres; i++)
 	{
-		if (spheres[i].intersectRay(losRay, distance, surfel))
+		if (data.spheres[i].intersectRay(losRay, distance, surfel))
 		{
-			visible = false;
+			return false;
 		}
 	}
 
-	return visible;
+	for (unsigned int i = 0; i < data.numTriangles; i++)
+	{
+		if (data.triangles[i].intersectRay(losRay, distance, surfel))
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
@@ -165,29 +180,8 @@ int main(int argc, char *argv[])
 {
 	Scene scene;
 
-	int numSpheres = 20;
-	int matIdx = scene.materialsVec.size();
+	buildScene(scene);
 
-	//add matrials
-	scene.materialsVec.push_back(Material(vec3(0, 1.0f, 1.0f), 0.9f));
-	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.9f));
-	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
-
-	//add point light
-	scene.pointLightsVec.push_back(PointLight(vec3(0, 5.5f, 0), vec3(400, 400, 400)));
-
-
-	//add Lights
-	for (int i = 0; i < numSpheres; i++)
-	{
-		Sphere s;
-
-		s.position = vec3(rnd(6.0f) - 3.0f, rnd(6.0f) - 3.0f, rnd(5.0f) - 8.0f);
-		s.radius = rnd(0.5f) + 0.5f;
-		s.materialIdx = matIdx + (i % 3);
-
-		scene.spheresVec.push_back(s);
-	}
 	Camera *camera;
 	PointLight *light;
 	Ray* rays;
@@ -215,14 +209,13 @@ int main(int argc, char *argv[])
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&triangles,
 		sizeof(Triangle)* scene.trianglesVec.size()));
 
-
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&rays,
 		sizeof(Ray)* DIM * DIM));
 	
 	//initialize values
 	Camera temp_c = Camera();
 
-
+	//copy data to GPU
 	CUDA_ERROR_HANDLE(cudaMemcpy(camera, &temp_c, sizeof(Camera), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(spheres, scene.spheresVec.data(), sizeof(Sphere)* scene.spheresVec.size(), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(triangles, scene.trianglesVec.data(), sizeof(Triangle)* scene.trianglesVec.size(), cudaMemcpyHostToDevice));
@@ -253,6 +246,88 @@ int main(int argc, char *argv[])
 	delete data;
 
 	return 0;
+}
+
+void buildScene(Scene& scene) {
+	float power = 800;
+
+	//add point light
+	scene.pointLightsVec.push_back(PointLight(vec3(-2, 4.0f, 0), vec3(power, power, power)));
+
+	//add Spheres
+	addRandomSpheres(scene, 20);
+
+	//add cornell box
+	addCornellBox(scene, 10);
+}
+
+void addRandomSpheres(Scene& scene, const size_t numSpheres)
+{
+	int matIdx = scene.materialsVec.size();
+
+	//add matrials
+	scene.materialsVec.push_back(Material(vec3(0, 1.0f, 1.0f), 0.9f));
+	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.9f));
+	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
+
+	for (int i = 0; i < numSpheres; i++)
+	{
+		Sphere s;
+
+		s.position = vec3(rnd(6.0f) - 3.0f, rnd(6.0f) - 3.0f, rnd(5.0f) - 8.0f);
+		s.radius = rnd(0.5f) + 0.5f;
+		s.materialIdx = matIdx + (i % 3);
+
+		scene.spheresVec.push_back(s);
+	}
+}
+
+void addCornellBox(Scene& scene, const float wallSize)
+{
+	using glm::translate;
+	using glm::scale;
+	using glm::rotate;
+	
+	int matIdx = scene.materialsVec.size();
+
+	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 0.8f), 0.9f));	//white			(+0)
+	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));	//red			(+1)
+	scene.materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.9f));	//green			(+2)
+	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f)));			//white light	(+3)
+
+	const float offset = wallSize / 2;
+
+	const mat4 scaleToWall = scale(vec3(wallSize, wallSize, wallSize));
+
+	//floor
+	mat4 trans = translate(vec3(0, -offset, -offset)) *
+		rotate(-(glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	scene.addRectangularModel(trans, matIdx);
+
+	//ceiling
+	trans = translate(vec3(0, offset, -offset)) *
+		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	scene.addRectangularModel(trans, matIdx);
+
+	//left wall
+	trans = translate(vec3(-offset, 0, -offset)) *
+		rotate((glm::mediump_float)90, vec3(0, 1, 0)) *
+		scaleToWall;
+	scene.addRectangularModel(trans, matIdx + 1);
+
+	//right wall
+	trans = translate(vec3(offset, 0, -offset)) *
+		rotate((glm::mediump_float)90, vec3(0, 1, 0)) *
+		scaleToWall;
+	scene.addRectangularModel(trans, matIdx + 2);
+
+	//back wall
+	trans = translate(vec3(0, 0, -wallSize)) *
+//		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	scene.addRectangularModel(trans, matIdx);
 }
 
 //TODO: Clean - doesn't need to be a kernel

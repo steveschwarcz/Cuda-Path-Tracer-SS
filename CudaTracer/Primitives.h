@@ -6,32 +6,35 @@
 class Triangle
 {
 public:
-	vec3* vertexes;
-	vec3* normals;
+	//TODO: Refactor: find a better way to do this
+	vec3 vertex0;
+	vec3 vertex1;
+	vec3 vertex2;
+	vec3 normal0;
+	vec3 normal1;
+	vec3 normal2;
 	int materialIdx;
 
 	Triangle()
 	{
-		vertexes = new vec3[3];
-		normals = new vec3[3];
 	}
 
-	Triangle(vec3 vertexes[3], vec3 normals[3], int materialIdx) :
-	vertexes(vertexes), normals(normals), materialIdx(materialIdx) {};
+	Triangle(vec3 vertex0, vec3 vertex1, vec3 vertex2, vec3 normal0, vec3 normal1, vec3 normal2, int materialIdx) :
+		vertex0(vertex0), vertex1(vertex1), vertex2(vertex2), normal0(normal0), normal1(normal1), normal2(normal2), materialIdx(materialIdx) {};
 
 	__device__
 	bool intersectRay(const Ray& ray, float& distance, SurfaceElement& surfel) const
 	{
 		float weight[3];
 
-		const vec3& e1 = vertexes[1] - vertexes[0];
-		const vec3& e2 = vertexes[2] - vertexes[0];
-		const vec3& q = cross(ray.direction, e2);
+		const vec3 e1 = vertex1 - vertex0;
+		const vec3 e2 = vertex2 - vertex0;
+		const vec3 q = cross(ray.direction, e2);
 
 		const float a = dot(e1,q);
 
-		const vec3& s = ray.origin - vertexes[0];
-		const vec3& r = cross(s, e1);
+		const vec3 s = ray.origin - vertex0;
+		const vec3 r = cross(s, e1);
 
 		weight[1] = dot(s, q) / a;
 		weight[2] = dot(ray.direction, r) / a;
@@ -50,9 +53,9 @@ public:
 			return false;
 		}
 
-		vec3 normalResult = normalize(vec3(normals[0] * weight[0] +
-			normals[1] * weight[1] +
-			normals[2] * weight[2]));
+		vec3 normalResult = normalize(vec3(normal0 * weight[0] +
+			normal1 * weight[1] +
+			normal2 * weight[2]));
 
 		vec3 intersectionPoint = ray.origin + ray.direction * dist;
 

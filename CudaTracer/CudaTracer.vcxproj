@@ -160,7 +160,6 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="Primitives.h" />
     <ClInclude Include="RenderStructs.h" />
     <ClInclude Include="CudaUtils.h" />
-    <ClInclude Include="RendererUtils.h" />
     <ClInclude Include="Scene.h" />
   </ItemGroup>
   <ItemGroup>
