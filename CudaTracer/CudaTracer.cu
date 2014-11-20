@@ -2,6 +2,7 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <gl/glew.h>
 #include <gl/GL.h>
 #include <gl/freeglut.h>
@@ -14,7 +15,7 @@
 
 //TODO: These ought to be done differently
 
-__global__ void kernel(uchar4 *ptr, RendererData data)
+__global__ void kernel(uchar4 *pixels, RendererData data)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -27,19 +28,27 @@ __global__ void kernel(uchar4 *ptr, RendererData data)
 	float distance = INFINITY;
 	SurfaceElement surfel;
 	char intersection = 0;
-	char3 radiance;
+	short3 radiance;
+	radiance.x = 0;
+	radiance.y = 0;
+	radiance.z = 0;
 
-	for (unsigned int i = 0; i < data.numSpheres; i++)
+	//TODO: Refactor into reusable way to find an intersection
+	for (size_t i = 0; i < data.numSpheres; i++)
 	{
-		if (data.spheres[i].intersectRay(tempRay, distance, surfel))
+		Sphere sphere = data.spheres[i];
+
+		if (sphere.intersectRay(tempRay, distance, surfel))
 		{
 			intersection = 1;
 		}
 	}
 
-	for (unsigned int i = 0; i < data.numTriangles; i++)
+	for (size_t i = 0; i < data.numTriangles; i++)
 	{
-		if (data.triangles[i].intersectRay(tempRay, distance, surfel))
+		Triangle triangle = data.triangles[i];
+
+		if (triangle.intersectRay(tempRay, distance, surfel))
 		{
 			intersection = 1;
 		}
@@ -47,14 +56,17 @@ __global__ void kernel(uchar4 *ptr, RendererData data)
 
 	if (intersection)
 	{	
+		//TODO
+		Material material = data.materials[surfel.materialIdx];
+
 		//intersection found, calculate direct light
-		radiance = shade(data, surfel, data.pLights->position, data.pLights->power, tempRay.direction, data.materials);
+		radiance = shade(data, surfel, material, tempRay.direction);
 	}
 	else
 	{
-		radiance.x = 100;
-		radiance.y = 100;
-		radiance.z = 100;
+		radiance.x = data.defaultColor.x;
+		radiance.y = data.defaultColor.y;
+		radiance.z = data.defaultColor.z;
 		tempRay.alive = 0;
 	}
 
@@ -62,10 +74,10 @@ __global__ void kernel(uchar4 *ptr, RendererData data)
 	data.rays[offset] = tempRay;
 
 	//access uchar4
-	ptr[offset].x = radiance.x;
-	ptr[offset].y = radiance.y;
-	ptr[offset].z = radiance.z;
-	ptr[offset].w = 255;
+	pixels[offset].x = static_cast<unsigned char>(glm::clamp<short>(radiance.x, 0, 255));
+	pixels[offset].y = static_cast<unsigned char>(glm::clamp<short>(radiance.y, 0, 255));
+	pixels[offset].z = static_cast<unsigned char>(glm::clamp<short>(radiance.z, 0, 255));
+	pixels[offset].w = 255;
 }
 
 __device__ 
@@ -89,42 +101,32 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera)
 }
 
 __device__
-char3 shade(const RendererData& data, const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* materials)
+short3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material, const vec3& w_o)
 {
 	vec3 w_i;
 	float distance2;
-	char3 radiance;
-
-	if (lineOfSight(data, surfel.point, lightPoint, w_i, distance2))
-	{
-		const vec3& L_i = lightPower / float(4 * M_PI * distance2);
-
-//		Radiance3 bsdfResult(0, 0, 0);
-
-		//either shade as glossy or lambertian
-//		if (allowGlossy && surfel.material()->glossyExponent() != INFINITY)
-//		{
-//			bsdfResult = surfel.material()->evaluateGlossyBSDF(w_i, w_o, surfel.shader().normal, fresnel);
-//		}
-//		else
-//		{
-//			bsdfResult = surfel.material()->evaluateLambertianBSDF(w_i, w_o);
-//		}
-
-		float cosI = fmax(0.0f, dot(surfel.normal, w_i));
-		Material mat = materials[surfel.materialIdx];
-
-		radiance.x = 255 * (cosI * L_i.r * mat.diffuseColor.r * mat.diffAvg / M_PI);
-		radiance.y = 255 * (cosI * L_i.g * mat.diffuseColor.g * mat.diffAvg / M_PI);
-		radiance.z = 255 * (cosI * L_i.b * mat.diffuseColor.b * mat.diffAvg / M_PI);
-
-		//scatter the light
-		return radiance;
-	}
-
+	short3 radiance;		//result may surpass 255, so an int3 is used
 	radiance.x = 0;
 	radiance.y = 0;
 	radiance.z = 0;
+
+
+	//TODO: loop through all lights
+	for (size_t i = 0; i < data.numPLights; i++)
+	{
+		PointLight light = data.pLights[i];
+
+		if (lineOfSight(data, surfel.point, light.position, w_i, distance2))
+		{
+			const vec3 L_i = light.power / float(4 * M_PI * distance2);
+
+			float cosI = fmax(0.0f, dot(surfel.normal, w_i));
+
+			radiance.x += 255 * (cosI * L_i.r * material.diffuseColor.r * material.diffAvg / M_PI);
+			radiance.y += 255 * (cosI * L_i.g * material.diffuseColor.g * material.diffAvg / M_PI);
+			radiance.z += 255 * (cosI * L_i.b * material.diffuseColor.b * material.diffAvg / M_PI);
+		}
+	}
 
 	return radiance;
 }
@@ -147,17 +149,21 @@ bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point
 	SurfaceElement surfel;
 
 	//TODO: More robust implementation
-	for (unsigned int i = 0; i < data.numSpheres; i++)
+	for (size_t i = 0; i < data.numSpheres; i++)
 	{
-		if (data.spheres[i].intersectRay(losRay, distance, surfel))
+		Sphere sphere = data.spheres[i];
+
+		if (sphere.intersectRay(losRay, distance, surfel))
 		{
 			return false;
 		}
 	}
 
-	for (unsigned int i = 0; i < data.numTriangles; i++)
+	for (size_t i = 0; i < data.numTriangles; i++)
 	{
-		if (data.triangles[i].intersectRay(losRay, distance, surfel))
+		Triangle triangle = data.triangles[i];
+
+		if (triangle.intersectRay(losRay, distance, surfel))
 		{
 			return false;
 		}
@@ -179,6 +185,11 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 int main(int argc, char *argv[])
 {
 	Scene scene;
+
+	uchar3 defaultColor;
+	defaultColor.x = 100;
+	defaultColor.y = 100;
+	defaultColor.z = 100;
 
 	buildScene(scene);
 
@@ -232,6 +243,9 @@ int main(int argc, char *argv[])
 	data->numTriangles = scene.trianglesVec.size();
 	data->rays = rays;
 	data->materials = materials;
+	data->defaultColor = defaultColor;
+
+
 
 	bitmap.anim_and_exit((void(*)(uchar4*, void*, int))generateFrame, NULL, (void(*)(unsigned char, int, int))Key);
 
@@ -253,6 +267,7 @@ void buildScene(Scene& scene) {
 
 	//add point light
 	scene.pointLightsVec.push_back(PointLight(vec3(-2, 4.0f, 0), vec3(power, power, power)));
+//	scene.pointLightsVec.push_back(PointLight(vec3(2, 1.0f, 0), vec3(power, power, power)));
 
 	//add Spheres
 	addRandomSpheres(scene, 20);

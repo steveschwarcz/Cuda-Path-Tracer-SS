@@ -21,6 +21,7 @@ struct RendererData
 	Triangle *triangles;
 	size_t numTriangles;
 	Material* materials;
+	uchar3 defaultColor;
 };
 
 void buildScene(Scene& scene);
@@ -33,7 +34,7 @@ __device__
 Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera);
 
 __device__
-char3 shade(const RendererData& data, const SurfaceElement& surfel, const vec3& lightPoint, const vec3& lightPower, const vec3& w_o, Material* material);
+short3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material, const vec3& w_o);
 
 __device__
 bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2);
