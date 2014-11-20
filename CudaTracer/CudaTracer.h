@@ -36,7 +36,7 @@ void generateFrame(uchar4 *pixels, void*, int ticks);
 void Key(unsigned char key, int x, int y);
 
 __device__
-Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera);
+Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera, curandState& state);
 
 __device__
 vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material);

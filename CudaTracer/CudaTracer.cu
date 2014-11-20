@@ -18,9 +18,11 @@
 //Initialize curand states
 __global__ void curandSetupKernel(curandState *state)
 {
-	int id = threadIdx.x + blockIdx.x * blockDim.x;
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	int offset = x + y * blockDim.x * gridDim.x;
 	/* Each thread gets same seed, a different sequence number, no offset */ 
-	curand_init(clock64(), id, 0, &state[id]);
+	curand_init((unsigned int)clock64(), offset, 0, &state[offset]);
 }
 
 __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, int iterations)
@@ -29,12 +31,15 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
 
+	//get curand state
+	curandState localState = data.curandStates[offset];
+
 	Ray ray(true);
 
 	if (iterations == 0)
 	{
 		//create the ray if this a new render
-		ray = computeEyeRay(x, y, DIM, DIM, data.camera);
+		ray = computeEyeRay(x, y, DIM, DIM, data.camera, localState);
 
 		ray.pixelOffset = offset;
 	}
@@ -49,15 +54,29 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 	{
 		vec3 radiance = ray.directLightColor + ray.indirectLightColor;
 
-		uchar4 pixel;
+		uchar3 newPixel;
+		int3 totalPixels;		//the average of the current pixel, multiplied by number of samples (ticks)
 
-		//access uchar4
-		pixel.x = static_cast<unsigned char>(glm::clamp<float>(255 * radiance.x, 0.f, 255.f));
-		pixel.y = static_cast<unsigned char>(glm::clamp<float>(255 * radiance.y, 0.f, 255.f));
-		pixel.z = static_cast<unsigned char>(glm::clamp<float>(255 * radiance.z, 0.f, 255.f));
-		pixel.w = 255;
+		//update pixel
+		newPixel.x = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.x, 0.f, 255.f));
+		newPixel.y = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.y, 0.f, 255.f));
+		newPixel.z = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.z, 0.f, 255.f));
 
-		pixels[ray.pixelOffset] = pixel;
+		//now average the pixels
+		uchar4 currentPixel = pixels[ray.pixelOffset];
+
+		totalPixels.x = currentPixel.x * ticks;
+		totalPixels.y = currentPixel.y * ticks;
+		totalPixels.z = currentPixel.z * ticks;
+
+		float inverseTicks = 1.f / (ticks + 1);
+		currentPixel.x = static_cast<unsigned char>((totalPixels.x + newPixel.x) * inverseTicks);
+		currentPixel.y = static_cast<unsigned char>((totalPixels.y + newPixel.y) * inverseTicks);
+		currentPixel.z = static_cast<unsigned char>((totalPixels.z + newPixel.z) * inverseTicks);
+		currentPixel.w = 255;
+
+
+		pixels[ray.pixelOffset] = currentPixel;
 
 		return;
 	}
@@ -127,8 +146,6 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 		//--------------------------
 		//		Scattering
 		//--------------------------
-		//get curand state
-		curandState localState = data.curandStates[offset];
 
 		//both indexes of refraction, n1 / n2, and sin T squared
 		float n1, n2, n, sinT2;
@@ -180,14 +197,21 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 		ray.active = false;
 	}
 
+
+	//update curand state
+	data.curandStates[offset] = localState;
+
 	//save the ray
 	data.rays[offset] = ray;
 }
 
 __device__ 
-Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera)
+Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera, curandState& state)
 {
 	const float aspectRatio = float(dimY) / dimX;
+
+	float jitteredX = x + curand_uniform(&state);
+	float jitteredY = y + curand_uniform(&state);
 
 	// Compute the side of a square at z = -1 (the far clipping plane) based on the 
 	// horizontal left-edge-to-right-edge field of view
@@ -196,8 +220,8 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera)
 	const float s = -2 * tan(camera->fieldOfView * 0.5f);
 
 	// xPos / image.width() : map from 0 - 1 where the pixel is on the image
-	const vec3 start = vec3(((float(x) / dimX) - 0.5f) * s,
-		1 * ((float(y) / dimY) - 0.5f) * s * aspectRatio,
+	const vec3 start = vec3(((jitteredX / dimX) - 0.5f) * s,
+		1 * ((jitteredY / dimY) - 0.5f) * s * aspectRatio,
 		1.0f)
 		* camera->zNear;
 
@@ -546,7 +570,7 @@ void addCornellBox(Scene& scene, const float wallSize)
 
 	//right wall
 	trans = translate(vec3(offset, 0, -offset)) *
-		rotate((glm::mediump_float)90, vec3(0, 1, 0)) *
+		rotate((glm::mediump_float)-90, vec3(0, 1, 0)) *
 		scaleToWall;
 	scene.addRectangularModel(trans, matIdx + 2);
 
