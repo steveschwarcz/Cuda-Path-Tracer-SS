@@ -10,6 +10,29 @@ Scene::~Scene()
 {
 }
 
+/// <summary>
+/// Adds a rectangular area light.
+/// </summary>
+/// <param name="transformation">The transformation to use on the model as it is created.</param>
+/// <param name="materialIdx">The index of the material to use.</param>
+/// <param name="power">The power of the light to create.</param>
+void Scene::addAreaLight(mat4 transformation, int materialIdx, vec3 power)
+{
+	size_t triangleIdx = trianglesVec.size();
+
+	//create model for light
+	addRectangularModel(transformation, materialIdx);
+
+	//add the light to the scene
+	areaLightsVec.push_back(AreaLight(triangleIdx, triangleIdx + 1));
+}
+
+
+/// <summary>
+/// Initializes a rectangular model composed of 2 triangles.
+/// </summary>
+/// <param name="transformation">The transformation to use on the model as it is created.</param>
+/// <param name="materialIdx">The index of the material to use.</param>
 void Scene::addRectangularModel(mat4 transformation, int materialIdx)
 {
 	vec4 newVertex[4];

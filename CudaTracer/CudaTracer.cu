@@ -112,9 +112,9 @@ short3 shade(const RendererData& data, const SurfaceElement& surfel, const Mater
 
 
 	//TODO: loop through all lights
-	for (size_t i = 0; i < data.numPLights; i++)
+	for (size_t i = 0; i < data.numPointLights; i++)
 	{
-		PointLight light = data.pLights[i];
+		PointLight light = data.pointLights[i];
 
 		if (lineOfSight(data, surfel.point, light.position, w_i, distance2))
 		{
@@ -194,7 +194,8 @@ int main(int argc, char *argv[])
 	buildScene(scene);
 
 	Camera *camera;
-	PointLight *light;
+	PointLight *pointLights;
+	AreaLight *areaLights;
 	Ray* rays;
 	Sphere *spheres;
 	Triangle *triangles;
@@ -208,8 +209,11 @@ int main(int argc, char *argv[])
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&camera,
 		sizeof(Camera)));
 
-	CUDA_ERROR_HANDLE(cudaMalloc((void**)&light,
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&pointLights,
 		sizeof(PointLight)* scene.pointLightsVec.size()));
+
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&areaLights,
+		sizeof(AreaLight)* scene.areaLightsVec.size()));
 
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&spheres,
 		sizeof(Sphere)* scene.spheresVec.size()));
@@ -230,13 +234,16 @@ int main(int argc, char *argv[])
 	CUDA_ERROR_HANDLE(cudaMemcpy(camera, &temp_c, sizeof(Camera), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(spheres, scene.spheresVec.data(), sizeof(Sphere)* scene.spheresVec.size(), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(triangles, scene.trianglesVec.data(), sizeof(Triangle)* scene.trianglesVec.size(), cudaMemcpyHostToDevice));
-	CUDA_ERROR_HANDLE(cudaMemcpy(light, scene.pointLightsVec.data(), sizeof(PointLight)* scene.pointLightsVec.size(), cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(pointLights, scene.pointLightsVec.data(), sizeof(PointLight)* scene.pointLightsVec.size(), cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(areaLights, scene.areaLightsVec.data(), sizeof(AreaLight)* scene.areaLightsVec.size(), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(materials, scene.materialsVec.data(), sizeof(Material)* scene.materialsVec.size(), cudaMemcpyHostToDevice));
 
 	//put values in a data block
 	data->camera = camera;
-	data->pLights = light;
-	data->numPLights = scene.pointLightsVec.size();
+	data->pointLights = pointLights;
+	data->numPointLights = scene.pointLightsVec.size();
+	data->areaLights = areaLights;
+	data->numAreaLights = scene.areaLightsVec.size();
 	data->spheres = spheres;
 	data->numSpheres = scene.spheresVec.size();
 	data->triangles = triangles;
@@ -251,7 +258,8 @@ int main(int argc, char *argv[])
 
 	//free
 	CUDA_ERROR_HANDLE(cudaFree(camera));
-	CUDA_ERROR_HANDLE(cudaFree(light));
+	CUDA_ERROR_HANDLE(cudaFree(pointLights));
+	CUDA_ERROR_HANDLE(cudaFree(areaLights));
 	CUDA_ERROR_HANDLE(cudaFree(spheres));
 	CUDA_ERROR_HANDLE(cudaFree(triangles));
 	CUDA_ERROR_HANDLE(cudaFree(rays));

@@ -55,6 +55,17 @@ struct PointLight
 		position(position), power(power) {}
 };
 
+//Area Light - only 2 triangles for now
+struct AreaLight
+{
+	vec3 power;
+	int triangleIdx0;
+	int triangleIdx1;
+
+	AreaLight(int triangleIdx0, int triangleIdx1) :
+		triangleIdx0(triangleIdx0), triangleIdx1(triangleIdx1), power(power) {}
+};
+
 
 struct Material
 {

@@ -13,8 +13,10 @@
 struct RendererData
 {
 	Camera *camera;
-	PointLight *pLights;
-	size_t numPLights;
+	PointLight *pointLights;
+	size_t numPointLights;
+	AreaLight *areaLights;
+	size_t numAreaLights;
 	Ray* rays;
 	Sphere *spheres;
 	size_t numSpheres;
@@ -30,6 +32,7 @@ void addCornellBox(Scene& scene, const float wallSize);
 
 void generateFrame(uchar4 *pixels, void*, int ticks);
 void Key(unsigned char key, int x, int y);
+
 __device__
 Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera);
 
