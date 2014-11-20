@@ -158,9 +158,13 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   <ItemGroup>
     <ClInclude Include="CudaTracer.h" />
     <ClInclude Include="Primitives.h" />
-    <ClInclude Include="Renderer.h" />
+    <ClInclude Include="RenderStructs.h" />
     <ClInclude Include="CudaUtils.h" />
     <ClInclude Include="RendererUtils.h" />
+    <ClInclude Include="Scene.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Scene.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

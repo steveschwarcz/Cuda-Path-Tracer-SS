@@ -1,23 +1,23 @@
 #pragma once
+#include "cuda_runtime.h"
 
-#include "Renderer.h"
+#include "RenderStructs.h"
 
-struct Triangle
+class Triangle
 {
+public:
 	vec3* vertexes;
 	vec3* normals;
 	int materialIdx;
 
-	__device__ __host__
 	Triangle()
 	{
 		vertexes = new vec3[3];
 		normals = new vec3[3];
 	}
 
-	__device__ __host__
-	Triangle(vec3 vertexes[3], vec3 normals[3]) :
-		vertexes(vertexes), normals(normals) {};
+	Triangle(vec3 vertexes[3], vec3 normals[3], int materialIdx) :
+	vertexes(vertexes), normals(normals), materialIdx(materialIdx) {};
 
 	__device__
 	bool intersectRay(const Ray& ray, float& distance, SurfaceElement& surfel) const
@@ -63,13 +63,15 @@ struct Triangle
 	}
 };
 
-struct Sphere
+class Sphere
 {
+public:
 	vec3 position;
 	float radius;
 	int materialIdx;
 
-	__device__ __host__
+	Sphere(){};
+
 	Sphere(vec3 position, float radius) :
 		radius(radius), position(position) {};
 

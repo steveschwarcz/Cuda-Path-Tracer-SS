@@ -14,14 +14,14 @@
 
 //TODO: These ought to be done differently
 
-__global__ void kernel(uchar4 *ptr, Sphere* spheres, int numSpheres, Camera *camera, PointLight* pointLight, Material* materials, Ray* rays)
+__global__ void kernel(uchar4 *ptr, RendererData data)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
 
 	//create the ray
-	Ray tempRay = computeEyeRay(x, y, DIM, DIM, camera);
+	Ray tempRay = computeEyeRay(x, y, DIM, DIM, data.camera);
 
 	//loop through spheres, finding intersection
 	float distance = INFINITY;
@@ -29,9 +29,9 @@ __global__ void kernel(uchar4 *ptr, Sphere* spheres, int numSpheres, Camera *cam
 	char intersection = 0;
 	char3 radiance;
 
-	for (int i = 0; i < numSpheres; i++)
+	for (int i = 0; i < data.numSpheres; i++)
 	{
-		if (spheres[i].intersectRay(tempRay, distance, surfel))
+		if (data.spheres[i].intersectRay(tempRay, distance, surfel))
 		{
 			intersection = 1;
 		}
@@ -40,7 +40,7 @@ __global__ void kernel(uchar4 *ptr, Sphere* spheres, int numSpheres, Camera *cam
 	if (intersection)
 	{	
 		//intersection found, calculate direct light
-		radiance = shade(spheres, surfel, pointLight->position, pointLight->power, tempRay.direction, materials);
+		radiance = shade(data.spheres, surfel, data.pLights->position, data.pLights->power, tempRay.direction, data.materials);
 	}
 	else
 	{
@@ -51,7 +51,7 @@ __global__ void kernel(uchar4 *ptr, Sphere* spheres, int numSpheres, Camera *cam
 	}
 
 	//save the ray
-	rays[offset] = tempRay;
+	data.rays[offset] = tempRay;
 
 	//access uchar4
 	ptr[offset].x = radiance.x;
@@ -106,9 +106,9 @@ char3 shade(Sphere* spheres, const SurfaceElement& surfel, const vec3& lightPoin
 		float cosI = fmax(0.0f, dot(surfel.normal, w_i));
 		Material mat = materials[surfel.materialIdx];
 
-		radiance.x = 255 * (cosI * L_i.x * mat.diffuseColor.r / M_PI);
-		radiance.y = 255 * (cosI * L_i.y * mat.diffuseColor.g / M_PI);
-		radiance.z = 255 * (cosI * L_i.z * mat.diffuseColor.b / M_PI);
+		radiance.x = 255 * (cosI * L_i.r * mat.diffuseColor.r * mat.diffAvg / M_PI);
+		radiance.y = 255 * (cosI * L_i.g * mat.diffuseColor.g * mat.diffAvg / M_PI);
+		radiance.z = 255 * (cosI * L_i.b * mat.diffuseColor.b * mat.diffAvg / M_PI);
 
 		//scatter the light
 		return radiance;
@@ -158,14 +158,36 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
-	kernel <<< grids, threads >>>(pixels, data->spheres, data->numSpheres, data->camera, data->light, data->materials, data->rays);
+	kernel <<< grids, threads >>>(pixels, *data);
 }
 
 int main(int argc, char *argv[])
 {
-	int numSpheres = 20;
-	int numMaterials = 3;
+	Scene scene;
 
+	int numSpheres = 20;
+	int matIdx = scene.materialsVec.size();
+
+	//add matrials
+	scene.materialsVec.push_back(Material(vec3(0, 1.0f, 1.0f), 0.9f));
+	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.9f));
+	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
+
+	//add point light
+	scene.pointLightsVec.push_back(PointLight(vec3(0, 5.5f, 0), vec3(400, 400, 400)));
+
+
+	//add Lights
+	for (int i = 0; i < numSpheres; i++)
+	{
+		Sphere s;
+
+		s.position = vec3(rnd(6.0f) - 3.0f, rnd(6.0f) - 3.0f, rnd(5.0f) - 8.0f);
+		s.radius = rnd(0.5f) + 0.5f;
+		s.materialIdx = matIdx + (i % 3);
+
+		scene.spheresVec.push_back(s);
+	}
 	Camera *camera;
 	PointLight *light;
 	Ray* rays;
@@ -174,7 +196,7 @@ int main(int argc, char *argv[])
 	Material *materials;
 
 	//initialize bitmap and data
-	RendererData *data = (RendererData*)malloc(sizeof(RendererData));
+	RendererData *data = new RendererData();
 	GPUAnimBitmap bitmap(DIM, DIM, data);
 
 	//allocate GPU pointers
@@ -182,49 +204,40 @@ int main(int argc, char *argv[])
 		sizeof(Camera)));
 
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&light,
-		sizeof(PointLight)));
+		sizeof(PointLight)* scene.pointLightsVec.size()));
 
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&spheres,
-		sizeof(Sphere)* numSpheres));
+		sizeof(Sphere)* scene.spheresVec.size()));
+
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&materials,
+		sizeof(Material)* scene.materialsVec.size()));
+
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&triangles,
+		sizeof(Triangle)* scene.trianglesVec.size()));
+
 
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&rays,
 		sizeof(Ray)* DIM * DIM));
-
-	CUDA_ERROR_HANDLE(cudaMalloc((void**)&materials,
-		sizeof(Material) * numMaterials));
 	
 	//initialize values
-	Sphere *temp_s;
 	Camera temp_c = Camera();
-	PointLight temp_l = PointLight(vec3(0, 5.5f, 0), vec3(400, 400, 400));
-	Material *temp_m;
-
-	temp_m = (Material*)malloc(sizeof(Material)* numMaterials);
-
-	temp_m[0] = Material(vec3(0, 1.0f, 1.0f));
-	temp_m[1] = Material(vec3(1.0f, 1.0f, 1.0f));
-	temp_m[2] = Material(vec3(1.0f, 0.0f, 0.0f));
-
-	temp_s = (Sphere*)malloc(sizeof(Sphere) * numSpheres);
-	for (int i = 0; i < numSpheres; i++)
-	{
-		temp_s[i].position = vec3(rnd(6.0f) - 3.0f, rnd(6.0f) - 3.0f, rnd(5.0f) - 8.0f);
-		temp_s[i].radius = rnd(0.5f) + 0.5f;
-		temp_s[i].materialIdx = i % numMaterials;
-	}
 
 
-	CUDA_ERROR_HANDLE(cudaMemcpy(spheres, temp_s, sizeof(Sphere)* numSpheres, cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(camera, &temp_c, sizeof(Camera), cudaMemcpyHostToDevice));
-	CUDA_ERROR_HANDLE(cudaMemcpy(light, &temp_l, sizeof(PointLight), cudaMemcpyHostToDevice));
-	CUDA_ERROR_HANDLE(cudaMemcpy(materials, temp_m, sizeof(Material)* numMaterials, cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(spheres, scene.spheresVec.data(), sizeof(Sphere)* scene.spheresVec.size(), cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(triangles, scene.trianglesVec.data(), sizeof(Triangle)* scene.trianglesVec.size(), cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(light, scene.pointLightsVec.data(), sizeof(PointLight)* scene.pointLightsVec.size(), cudaMemcpyHostToDevice));
+	CUDA_ERROR_HANDLE(cudaMemcpy(materials, scene.materialsVec.data(), sizeof(Material)* scene.materialsVec.size(), cudaMemcpyHostToDevice));
 
 	//put values in a data block
 	data->camera = camera;
-	data->light = light;
+	data->pLights = light;
+	data->numPLights = scene.pointLightsVec.size();
 	data->spheres = spheres;
+	data->numSpheres = scene.spheresVec.size();
+	data->triangles = triangles;
+	data->numTriangles = scene.trianglesVec.size();
 	data->rays = rays;
-	data->numSpheres = numSpheres;
 	data->materials = materials;
 
 	bitmap.anim_and_exit((void(*)(uchar4*, void*, int))generateFrame, NULL, (void(*)(unsigned char, int, int))Key);
@@ -233,14 +246,16 @@ int main(int argc, char *argv[])
 	CUDA_ERROR_HANDLE(cudaFree(camera));
 	CUDA_ERROR_HANDLE(cudaFree(light));
 	CUDA_ERROR_HANDLE(cudaFree(spheres));
+	CUDA_ERROR_HANDLE(cudaFree(triangles));
 	CUDA_ERROR_HANDLE(cudaFree(rays));
 	CUDA_ERROR_HANDLE(cudaFree(materials));
-	free(temp_s);
-	free(data);
+	
+	delete data;
 
 	return 0;
 }
 
+//TODO: Clean - doesn't need to be a kernel
 __global__ void moveCamera(Camera *camera, unsigned char key)
 {
 	switch (key) {
