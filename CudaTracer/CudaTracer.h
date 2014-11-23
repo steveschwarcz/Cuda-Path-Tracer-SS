@@ -26,6 +26,8 @@ struct RendererData
 	size_t numTriangles;
 	Material* materials;
 	curandState* curandStates;
+	int resetTick = 0;
+	int maxIterations = 10;
 };
 
 void buildScene(Scene& scene);
@@ -39,7 +41,10 @@ __device__
 Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera, curandState& state);
 
 __device__
-vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material);
+vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material, curandState& state);
+
+__device__
+vec3 getAreaLightPoint(const AreaLight& light, Triangle* triangles, curandState& state);
 
 __device__
 bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2);

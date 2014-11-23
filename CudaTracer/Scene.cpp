@@ -23,8 +23,14 @@ void Scene::addAreaLight(mat4 transformation, int materialIdx, vec3 power)
 	//create model for light
 	addRectangularModel(transformation, materialIdx);
 
+	//Get the area of the light.  Since hte light is 2 equally sized triangles, only the area of the first one needs to be calculated, then doubled
+	vec3 edge1 = trianglesVec[triangleIdx].vertex1 - trianglesVec[triangleIdx].vertex2;
+	vec3 edge2 = trianglesVec[triangleIdx].vertex2 - trianglesVec[triangleIdx].vertex0;
+
+	float area = glm::length(cross(edge1, edge2));
+
 	//add the light to the scene
-	areaLightsVec.push_back(AreaLight(triangleIdx, triangleIdx + 1));
+	areaLightsVec.push_back(AreaLight(power, triangleIdx, 2, area));
 }
 
 

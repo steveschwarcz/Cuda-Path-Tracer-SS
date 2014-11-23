@@ -8,6 +8,8 @@
 #include <gl/freeglut.h>
 #include "cuda_gl_interop.h"
 #include <curand_kernel.h>
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
 #include "CudaUtils.h"
 #include "Primitives.h"
 #include "CudaTracer.h"
@@ -36,12 +38,27 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 
 	Ray ray(true);
 
+	//adjust the ticks (ticks == rays per pixel)
+	ticks = ticks - data.resetTick;
+
 	if (iterations == 0)
 	{
 		//create the ray if this a new render
 		ray = computeEyeRay(x, y, DIM, DIM, data.camera, localState);
 
 		ray.pixelOffset = offset;
+
+
+		//this is the reset tick, meaning that the pixel buffer needs to be reset. 0 or 1 is chosen, so that the 0 can be used for quick navigation
+		if (ticks == 0) {
+			uchar4 newPixel;
+			newPixel.x = 0;
+			newPixel.y = 0;
+			newPixel.z = 0;
+			newPixel.w = 0;
+
+			pixels[offset] = newPixel;
+		}
 	}
 	else
 	{
@@ -50,9 +67,9 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 	}
 
 	//before continuing, be sure that the ray is still active
-	if (!ray.active || iterations == 9)
+	if (!ray.active || iterations == data.maxIterations - 1)
 	{
-		vec3 radiance = ray.directLightColor + ray.indirectLightColor;
+		vec3 radiance = ray.radiance0 + ray.radiance1;
 
 		uchar3 newPixel;
 		int3 totalPixels;		//the average of the current pixel, multiplied by number of samples (ticks)
@@ -131,15 +148,14 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 			//get material
 		Material material = data.materials[surfel.materialIdx];
 
-		if (iterations == 0) {
-			//emit if material is emitter
-			ray.directLightColor += material.emmitance;
+		vec3 directRadiance(0, 0, 0), indirectRadiance(0, 0, 0);
 
-			//calculate direct light
-			short3 directRadiance;
-			if (!inside) {
-				ray.directLightColor += shade(data, surfel, material);
-			}
+		//emit if material is emitter
+		directRadiance += material.emmitance;
+
+		//calculate direct light
+		if (!inside) {
+			directRadiance += shade(data, surfel, material, localState);
 		}
 
 
@@ -166,9 +182,6 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 
 			if (r < 0.0f)
 			{
-				if (iterations == 0) {
-					ray.indirectLightColor = vec3(1, 1, 1);
-				}
 
 				vec3 L(0, 0, 0);
 				vec3 w_o = cosHemiRandom(surfel.normal, localState);
@@ -176,24 +189,25 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 				ray.origin = surfel.point + RAY_BUMP_EPSILON * w_o;
 				ray.direction = w_o;
 
-				ray.indirectLightColor.x *= .1f * material.diffuseColor.x;
-				ray.indirectLightColor.y *= .1f * material.diffuseColor.y;
-				ray.indirectLightColor.z *= .1f * material.diffuseColor.z;
+				indirectRadiance.x = material.diffuseColor.x;
+				indirectRadiance.y = material.diffuseColor.y;
+				indirectRadiance.z = material.diffuseColor.z;
 			}
 			else {
 				ray.active = false;
 			}
 		}
+
+		//save radiance
+		ray.radiance0.x += ray.radiance1.x * directRadiance.x;
+		ray.radiance0.y += ray.radiance1.y * directRadiance.y;
+		ray.radiance0.z += ray.radiance1.z * directRadiance.z;
+		ray.radiance1.x *= indirectRadiance.x;
+		ray.radiance1.y *= indirectRadiance.y;
+		ray.radiance1.z *= indirectRadiance.z;
 	}
 	else
 	{
-		if (iterations == 0) {
-			ray.directLightColor = data.defaultColor;
-		}
-		else {
-			ray.indirectLightColor *= data.defaultColor;
-		}
-
 		ray.active = false;
 	}
 
@@ -229,14 +243,14 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera, curandState&
 }
 
 __device__
-vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material)
+vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material, curandState& state)
 {
 	vec3 w_i;
 	float distance2;
 	vec3 radiance = vec3(0, 0, 0);
 
 
-	//TODO: loop through all lights
+	//loop through all point lights
 	for (size_t i = 0; i < data.numPointLights; i++)
 	{
 		PointLight light = data.pointLights[i];
@@ -253,7 +267,47 @@ vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Materia
 		}
 	}
 
+	//loop through all area lights
+	for (size_t i = 0; i < data.numAreaLights; i++)
+	{
+		AreaLight light = data.areaLights[i];
+
+		vec3 point = getAreaLightPoint(light, data.triangles, state);
+
+		if (lineOfSight(data, surfel.point, point, w_i, distance2))
+		{
+			const vec3 L_i = light.power / float(4 * M_PI * distance2);
+
+			float cosI = fmax(0.0f, dot(surfel.normal, w_i));
+
+			radiance.x += cosI * L_i.r * material.diffuseColor.r * material.diffAvg * INVERSE_PI;
+			radiance.y += cosI * L_i.g * material.diffuseColor.g * material.diffAvg * INVERSE_PI;
+			radiance.z += cosI * L_i.b * material.diffuseColor.b * material.diffAvg * INVERSE_PI;
+		}
+	}
+
 	return radiance;
+}
+
+__device__
+vec3 getAreaLightPoint(const AreaLight& light, Triangle* triangles, curandState& state) {
+	//get a random point on a triangle
+	float u1 = curand_uniform(&state);
+	float u2 = curand_uniform(&state) * u1;
+	float weight0 = u1 - u2, weight1 = u2, weight2 = 1 - u1;
+	
+	//FIXME: This only works because the light is known to be rectangular - This needs to be expanded for more complex lights
+	//get a random point on the light's triangles
+	if (curand_uniform(&state) > .5f) {
+		return triangles[light.triangleIdx].vertex0 * weight0 +
+			triangles[light.triangleIdx].vertex1 * weight1 +
+			triangles[light.triangleIdx].vertex2* weight2;
+	}
+	else {
+		return triangles[light.triangleIdx + 1].vertex0 * weight0 +
+			triangles[light.triangleIdx + 1].vertex1 * weight1 +
+			triangles[light.triangleIdx + 1].vertex2* weight2;
+	}
 }
 
 __device__
@@ -297,6 +351,7 @@ bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point
 	return true;
 }
 
+__device__
 float computeFresnelForReflectance(const float cosI, const float sinT2, const float n1, const float n2, const float n)
 {
 	//check for TIR
@@ -313,6 +368,7 @@ float computeFresnelForReflectance(const float cosI, const float sinT2, const fl
 	return (r_s * r_s + r_p * r_p) * 0.5f;
 }
 
+__device__
 void computeSinT2AndRefractiveIndexes(const float refrIndex, float& cosI, float& sinT2, float& n1, float& n2, float& n)
 {
 	if (cosI > 0)
@@ -334,6 +390,7 @@ void computeSinT2AndRefractiveIndexes(const float refrIndex, float& cosI, float&
 	sinT2 = n * n * (1.0f - cosI * cosI);
 }
 
+__device__
 Ray reflRay(const vec3& incident, const SurfaceElement& surfel, const float cosI)
 {
 	vec3 w_o = incident - 2 * (-cosI) * surfel.normal;
@@ -341,6 +398,7 @@ Ray reflRay(const vec3& incident, const SurfaceElement& surfel, const float cosI
 	return Ray(surfel.point + (w_o * RAY_BUMP_EPSILON), w_o);
 }
 
+__device__
 Ray refrRay(const vec3& incident, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n)
 {
 	//check for TIR
@@ -356,6 +414,7 @@ Ray refrRay(const vec3& incident, const SurfaceElement& surfel, const float cosI
 	return Ray(surfel.point + (w_o * RAY_BUMP_EPSILON), w_o);
 }
 
+__device__
 const vec3 cosHemiRandom(vec3 const& normal, curandState& state)
 {
 	float theta = curand_uniform(&state) * 2 * M_PI;
@@ -369,6 +428,7 @@ const vec3 cosHemiRandom(vec3 const& normal, curandState& state)
 	return rot * sample;
 }
 
+__device__
 const vec3 cosHemiRandomPhong(const vec3& w_o, float exponent, curandState& state)
 {
 	float theta = curand_uniform(&state) * 2 * M_PI;
@@ -382,6 +442,7 @@ const vec3 cosHemiRandomPhong(const vec3& w_o, float exponent, curandState& stat
 	return rot * sample;
 }
 
+__device__
 const quat rotateVectorToVector(const vec3& source, const vec3& target)
 {
 	vec3 axis = cross(source, target);
@@ -398,8 +459,17 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
 
-	for (unsigned int i = 0; i < 10; i++) {
-		pathTraceKernel <<< grids, threads >>>(pixels, *data, ticks, i);
+	//if reset tick is -1, it means that this frame the ticks are being reset
+	if (data->resetTick == -1) {
+		data->resetTick = ticks;
+	}
+	
+	//fire n rays per pixel
+	for (unsigned int i = 0; i < data->maxIterations; i++) {
+		pathTraceKernel << < grids, threads >> >(pixels, *data, ticks, i);
+
+		//TODO: Stream compaction here
+		//thrust::device_ptr<Ray> dev_ray_ptr(data->rays);
 	}
 }
 
@@ -502,7 +572,7 @@ void buildScene(Scene& scene) {
 	float power = 300;
 
 	//add point light
-	scene.pointLightsVec.push_back(PointLight(vec3(0, 0.0f, -2.5), vec3(power, power, power)));
+	//scene.pointLightsVec.push_back(PointLight(vec3(0, 0.0f, -2.5), vec3(power, power, power)));
 //	scene.pointLightsVec.push_back(PointLight(vec3(2, 1.0f, 0), vec3(power, power, power)));
 
 	//add Spheres
@@ -521,11 +591,11 @@ void addRandomSpheres(Scene& scene, const size_t numSpheres)
 	scene.materialsVec.push_back(Material(vec3(0.0f, 0.0f, 1.0f), 0.9f));
 	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
 
-	for (int i = 0; i < numSpheres; i++)
+	for (size_t i = 0; i < numSpheres; i++)
 	{
 		Sphere s;
 
-		s.position = vec3(rnd(6.0f) - 3.0f, rnd(6.0f) - 3.0f, rnd(5.0f) - 8.0f);
+		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(5.0f) - 8.0f);
 		s.radius = rnd(0.5f) + 0.5f;
 		s.materialIdx = matIdx + (i % 3);
 
@@ -579,6 +649,12 @@ void addCornellBox(Scene& scene, const float wallSize)
 //		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
 		scaleToWall;
 	scene.addRectangularModel(trans, matIdx);
+
+	//light
+	trans = translate(vec3(0, offset - 0.001f, -offset * 1.2f)) *
+		rotate((glm::mediump_float) 90, vec3(1, 0, 0)) *
+		scale(vec3(2.5f, 2.5f, 2.5f));
+	scene.addAreaLight(trans, matIdx + 3, vec3(800, 800, 800));
 }
 
 //TODO: Clean - doesn't need to be a kernel
@@ -640,6 +716,8 @@ void Key(unsigned char key, int x, int y) {
 			   exit(0);
 		}
 	}
+
+	((RendererData*)bitmap->dataBlock)->resetTick = -1;
 
 	moveCamera <<< 1, 1 >>>(((RendererData*)bitmap->dataBlock)->camera, key);
 }

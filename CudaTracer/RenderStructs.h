@@ -25,14 +25,14 @@ struct Ray
 {
 	vec3 origin;
 	vec3 direction;
-	vec3 directLightColor;
-	vec3 indirectLightColor;
+	vec3 radiance0;
+	vec3 radiance1;
 	int pixelOffset;
 	bool active;
 
 	__device__
 	Ray(vec3 origin, vec3 direction) :
-	direction(direction), origin(origin), active(true), directLightColor(0, 0, 0), indirectLightColor(0, 0, 0) {};
+	direction(direction), origin(origin), active(true), radiance0(0, 0, 0), radiance1(1, 1, 1) {};
 
 	__device__
 	explicit Ray(bool alive) :
@@ -66,11 +66,12 @@ struct PointLight
 struct AreaLight
 {
 	vec3 power;
-	int triangleIdx0;
-	int triangleIdx1;
+	float area;
+	int triangleIdx;
+	size_t numTriangles;
 
-	AreaLight(int triangleIdx0, int triangleIdx1) :
-		triangleIdx0(triangleIdx0), triangleIdx1(triangleIdx1), power(power) {}
+	AreaLight(vec3 power, int triangleIdx, size_t numTriangles, float area) :
+		triangleIdx(triangleIdx), numTriangles(numTriangles), area(area), power(power) {}
 };
 
 
