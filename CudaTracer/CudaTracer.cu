@@ -10,6 +10,7 @@
 #include <curand_kernel.h>
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
+#include <thrust/partition.h>
 #include "CudaUtils.h"
 #include "Primitives.h"
 #include "CudaTracer.h"
@@ -27,74 +28,82 @@ __global__ void curandSetupKernel(curandState *state)
 	curand_init((unsigned int)clock64(), offset, 0, &state[offset]);
 }
 
-__global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, int iterations)
-{
+__global__ void clearPixels(uchar4 *pixels) {
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	int offset = x + y * blockDim.x * gridDim.x; 
+	
+	uchar4 newPixel;
+	newPixel.x = 0;
+	newPixel.y = 0;
+	newPixel.z = 0;
+	newPixel.w = 0;
+
+	pixels[offset] = newPixel;
+}
+
+__global__ void createEyeRays(Camera *camera, Ray* rays, curandState* states) {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
+
+	Ray ray = computeEyeRay(x, y, DIM, DIM, *camera, states[offset]);
+
+	ray.pixelOffset = offset;
+
+	rays[offset] = ray;
+}
+
+__global__ void writeToPixels(uchar4 *pixels, Ray* rays, int ticks) {
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	int offset = x + y * blockDim.x * gridDim.x;
+
+	Ray ray = rays[offset];
+
+	vec3 radiance = ray.radiance0 + ray.radiance1;
+
+	uchar3 newPixel;
+	int3 totalPixels;		//the average of the current pixel, multiplied by number of samples (ticks)
+
+	//update pixel
+	newPixel.x = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.x, 0.f, 255.f));
+	newPixel.y = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.y, 0.f, 255.f));
+	newPixel.z = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.z, 0.f, 255.f));
+
+	//now average the pixels
+	uchar4 currentPixel = pixels[ray.pixelOffset];
+
+	totalPixels.x = currentPixel.x * ticks;
+	totalPixels.y = currentPixel.y * ticks;
+	totalPixels.z = currentPixel.z * ticks;
+
+	float inverseTicks = 1.f / (ticks + 1);
+	currentPixel.x = static_cast<unsigned char>((totalPixels.x + newPixel.x) * inverseTicks + 0.5f);
+	currentPixel.y = static_cast<unsigned char>((totalPixels.y + newPixel.y) * inverseTicks + 0.5f);
+	currentPixel.z = static_cast<unsigned char>((totalPixels.z + newPixel.z) * inverseTicks + 0.5f);
+	currentPixel.w = 255;
+
+
+	pixels[ray.pixelOffset] = currentPixel;
+
+	return;
+}
+
+__global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iterations)
+{
+	int offset = threadIdx.x + blockIdx.x * blockDim.x;
 
 	//get curand state
 	curandState localState = data.curandStates[offset];
 
 	Ray ray(true);
 
-	//adjust the ticks (ticks == rays per pixel)
-	ticks = ticks - data.resetTick;
+	//use the existing ray
+	ray = data.rays[offset];
 
-	if (iterations == 0)
-	{
-		//create the ray if this a new render
-		ray = computeEyeRay(x, y, DIM, DIM, data.camera, localState);
-
-		ray.pixelOffset = offset;
-
-
-		//this is the reset tick, meaning that the pixel buffer needs to be reset. 0 or 1 is chosen, so that the 0 can be used for quick navigation
-		if (ticks == 0) {
-			uchar4 newPixel;
-			newPixel.x = 0;
-			newPixel.y = 0;
-			newPixel.z = 0;
-			newPixel.w = 0;
-
-			pixels[offset] = newPixel;
-		}
-	}
-	else
-	{
-		//use the existing ray
-		ray = data.rays[offset];
-	}
-
-	//before continuing, be sure that the ray is still active
-	if (!ray.active || iterations == data.maxIterations - 1)
-	{
-		vec3 radiance = ray.radiance0 + ray.radiance1;
-
-		uchar3 newPixel;
-		int3 totalPixels;		//the average of the current pixel, multiplied by number of samples (ticks)
-
-		//update pixel
-		newPixel.x = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.x, 0.f, 255.f));
-		newPixel.y = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.y, 0.f, 255.f));
-		newPixel.z = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.z, 0.f, 255.f));
-
-		//now average the pixels
-		uchar4 currentPixel = pixels[ray.pixelOffset];
-
-		totalPixels.x = currentPixel.x * ticks;
-		totalPixels.y = currentPixel.y * ticks;
-		totalPixels.z = currentPixel.z * ticks;
-
-		float inverseTicks = 1.f / (ticks + 1);
-		currentPixel.x = static_cast<unsigned char>((totalPixels.x + newPixel.x) * inverseTicks);
-		currentPixel.y = static_cast<unsigned char>((totalPixels.y + newPixel.y) * inverseTicks);
-		currentPixel.z = static_cast<unsigned char>((totalPixels.z + newPixel.z) * inverseTicks);
-		currentPixel.w = 255;
-
-
-		pixels[ray.pixelOffset] = currentPixel;
-
+	//before continuing, be sure that the ray is active
+	if (!ray.active) {
 		return;
 	}
 
@@ -189,9 +198,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 				ray.origin = surfel.point + RAY_BUMP_EPSILON * w_o;
 				ray.direction = w_o;
 
-				indirectRadiance.x = material.diffuseColor.x;
-				indirectRadiance.y = material.diffuseColor.y;
-				indirectRadiance.z = material.diffuseColor.z;
+				indirectRadiance = material.diffuseColor;
 			}
 			else {
 				ray.active = false;
@@ -199,12 +206,8 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 		}
 
 		//save radiance
-		ray.radiance0.x += ray.radiance1.x * directRadiance.x;
-		ray.radiance0.y += ray.radiance1.y * directRadiance.y;
-		ray.radiance0.z += ray.radiance1.z * directRadiance.z;
-		ray.radiance1.x *= indirectRadiance.x;
-		ray.radiance1.y *= indirectRadiance.y;
-		ray.radiance1.z *= indirectRadiance.z;
+		ray.radiance0 += ray.radiance1 * directRadiance;
+		ray.radiance1 *= indirectRadiance;
 	}
 	else
 	{
@@ -220,7 +223,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int ticks, in
 }
 
 __device__ 
-Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera, curandState& state)
+Ray computeEyeRay(int x, int y, int dimX, int dimY, const Camera& camera, curandState& state)
 {
 	const float aspectRatio = float(dimY) / dimX;
 
@@ -231,15 +234,15 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera, curandState&
 	// horizontal left-edge-to-right-edge field of view
 
 	//multiplying by negative 2 offsets the -.5 in the next step
-	const float s = -2 * tan(camera->fieldOfView * 0.5f);
+	const float s = -2 * tan(camera.fieldOfView * 0.5f);
 
 	// xPos / image.width() : map from 0 - 1 where the pixel is on the image
 	const vec3 start = vec3(((jitteredX / dimX) - 0.5f) * s,
 		1 * ((jitteredY / dimY) - 0.5f) * s * aspectRatio,
 		1.0f)
-		* camera->zNear;
+		* camera.zNear;
 
-	return Ray(camera->position, glm::normalize(camera->rotation * start));
+	return Ray(camera.position, glm::normalize(camera.rotation * start));
 }
 
 __device__
@@ -456,21 +459,36 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 
 	//TODO: Implement a way to reset ticks when moving
 
+	dim3 rayThreads(256);
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
 
 	//if reset tick is -1, it means that this frame the ticks are being reset
 	if (data->resetTick == -1) {
 		data->resetTick = ticks;
+
+		clearPixels<<<grids, threads>>>(pixels);
 	}
+
+	//create the rays
+	createEyeRays <<<grids, threads>>> (data->camera, data->rays, data->curandStates);
+
+	int numRays = DIM * DIM;
 	
 	//fire n rays per pixel
 	for (unsigned int i = 0; i < data->maxIterations; i++) {
-		pathTraceKernel << < grids, threads >> >(pixels, *data, ticks, i);
+		dim3 rayGrids(numRays / 256);
+		pathTraceKernel << < rayGrids, rayThreads >> >(pixels, *data, i);
 
-		//TODO: Stream compaction here
-		//thrust::device_ptr<Ray> dev_ray_ptr(data->rays);
+		//Stream compaction
+		thrust::device_ptr<Ray> dev_ray_ptr(data->rays);
+		thrust::device_ptr<Ray> partitionRay = thrust::partition(dev_ray_ptr, dev_ray_ptr + numRays, ray_is_active());
+
+		numRays = partitionRay - dev_ray_ptr;
 	}
+
+	//write results to buffer
+	writeToPixels <<<grids, threads>>>(pixels, data->rays, ticks - data->resetTick);
 }
 
 int main(int argc, char *argv[])
@@ -506,7 +524,7 @@ int main(int argc, char *argv[])
 
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&spheres,
 		sizeof(Sphere)* scene.spheresVec.size()));
-
+	
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&materials,
 		sizeof(Material)* scene.materialsVec.size()));
 
@@ -569,7 +587,7 @@ int main(int argc, char *argv[])
 }
 
 void buildScene(Scene& scene) {
-	float power = 300;
+	//float power = 300;
 
 	//add point light
 	//scene.pointLightsVec.push_back(PointLight(vec3(0, 0.0f, -2.5), vec3(power, power, power)));

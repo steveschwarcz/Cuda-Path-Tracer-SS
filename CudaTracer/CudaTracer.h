@@ -38,7 +38,7 @@ void generateFrame(uchar4 *pixels, void*, int ticks);
 void Key(unsigned char key, int x, int y);
 
 __device__
-Ray computeEyeRay(int x, int y, int dimX, int dimY, Camera* camera, curandState& state);
+Ray computeEyeRay(int x, int y, int dimX, int dimY, const Camera& camera, curandState& state);
 
 __device__
 vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material, curandState& state);
@@ -69,3 +69,12 @@ const vec3 cosHemiRandomPhong(const vec3& w_o, float exponent, curandState& stat
 
 __device__
 const quat rotateVectorToVector(const vec3& source, const vec3& target);
+
+struct ray_is_active
+{
+	__host__ __device__
+	bool operator()(const Ray &ray)
+	{
+		return ray.active;
+	}
+};

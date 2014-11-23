@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#define DIM 256
+#define DIM 512
 //#define WIDTH 800
 //#define HEIGHT 600
 

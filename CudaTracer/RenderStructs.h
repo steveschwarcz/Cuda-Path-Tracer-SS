@@ -35,7 +35,7 @@ struct Ray
 	direction(direction), origin(origin), active(true), radiance0(0, 0, 0), radiance1(1, 1, 1) {};
 
 	__device__
-	explicit Ray(bool alive) :
+	explicit Ray(bool alive = true) :
 		active(alive) {};
 };
 
