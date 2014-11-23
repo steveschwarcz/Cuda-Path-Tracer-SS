@@ -5,7 +5,7 @@
 #define INVERSE_255 0.00392156862f
 #define INVERSE_PI 0.31830988618f
 
-#define RAY_BUMP_EPSILON 1e-4f
+#define RAY_BUMP_EPSILON 5e-5f
 
 
 /// <summary>
@@ -26,8 +26,8 @@ struct RendererData
 	size_t numTriangles;
 	Material* materials;
 	curandState* curandStates;
-	int resetTick = 0;
-	int maxIterations = 10;
+	int resetTick = -1;
+	unsigned int maxIterations = 10;
 };
 
 void buildScene(Scene& scene);
@@ -56,10 +56,10 @@ __device__
 void computeSinT2AndRefractiveIndexes(const float refrIndex, float& cosI, float& sinT2, float& n1, float& n2, float& n);
 
 __device__
-Ray reflRay(const vec3& incident, const SurfaceElement& surfel, const float cosI);
+void reflRay(Ray& ray, const SurfaceElement& surfel, const float cosI);
 
 __device__
-Ray refrRay(const vec3& incident, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n);
+void refrRay(Ray& ray, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n);
 
 __device__
 const vec3 cosHemiRandom(vec3 const& normal, curandState& state);

@@ -61,7 +61,7 @@ __global__ void writeToPixels(uchar4 *pixels, Ray* rays, int ticks) {
 
 	Ray ray = rays[offset];
 
-	vec3 radiance = ray.radiance0 + ray.radiance1;
+	vec3 radiance = ray.radiance0;
 
 	uchar3 newPixel;
 	int3 totalPixels;		//the average of the current pixel, multiplied by number of samples (ticks)
@@ -138,16 +138,12 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 	{
 		//intersection occured
 
-		bool inside = false;
-
 		//find cos of incidence
+
 		float cosI = dot(-ray.direction, surfel.normal);
 
 		//if cosI is positive, ray is inside of primitive 
-		if (cosI < 0.0f)
-		{
-			inside = true;
-		}
+		bool inside = cosI < 0.0f;
 
 
 
@@ -157,7 +153,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 			//get material
 		Material material = data.materials[surfel.materialIdx];
 
-		vec3 directRadiance(0, 0, 0), indirectRadiance(0, 0, 0);
+		vec3 directRadiance(0, 0, 0), indirectRadiance(1, 1, 1);
 
 		//emit if material is emitter
 		directRadiance += material.emmitance;
@@ -200,9 +196,54 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 
 				indirectRadiance = material.diffuseColor;
 			}
-			else {
-				ray.active = false;
+
+		}
+		//reflective indirect light
+		if (r > 0 && material.specAvg > 0.0f)
+		{
+			//glossy reflection
+			/*if (material.pureRefl) {
+				r -= material.specAvg;
 			}
+			else {*/
+				r -= material.specAvg * fresnelReflective;
+			//}
+
+			if (r < 0.0f)
+			{
+				reflRay(ray, surfel, cosI);
+
+				//TODO: Reference paper
+				//glossy phong scattering
+				if (material.specularExponent != INFINITY) {
+					ray.direction = cosHemiRandomPhong(ray.direction, material.specularExponent, localState);
+
+					ray.origin = surfel.point + (RAY_BUMP_EPSILON * ray.direction);
+				}
+				//mirror reflectance otherwise.  Nothing to do
+
+				indirectRadiance = material.specularColor;
+			}
+		}
+		if (r > 0 && material.refrAvg > 0.0f)
+		{
+			const float fresnelRefractive = 1.0f - fresnelReflective;
+
+			//refraction
+			r -= material.refrAvg * fresnelRefractive;
+
+			if (r < 0.0f)
+			{
+				refrRay(ray, surfel, cosI, sinT2, n);
+
+				//TODO: Apply Beer's law
+			}
+		}
+
+		if (r > 0) {
+			//ray was absorbed
+			indirectRadiance = vec3(0, 0, 0);
+			ray.active = false;
 		}
 
 		//save radiance
@@ -211,6 +252,8 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 	}
 	else
 	{
+		//ray completely missed
+		ray.radiance1 *= data.defaultColor;
 		ray.active = false;
 	}
 
@@ -394,27 +437,29 @@ void computeSinT2AndRefractiveIndexes(const float refrIndex, float& cosI, float&
 }
 
 __device__
-Ray reflRay(const vec3& incident, const SurfaceElement& surfel, const float cosI)
+void reflRay(Ray& ray, const SurfaceElement& surfel, const float cosI)
 {
-	vec3 w_o = incident - 2 * (-cosI) * surfel.normal;
+	vec3 w_o = ray.direction - 2 * (-cosI) * surfel.normal;
 
-	return Ray(surfel.point + (w_o * RAY_BUMP_EPSILON), w_o);
+	ray.origin = surfel.point + (w_o * RAY_BUMP_EPSILON);
+	ray.direction = w_o;
 }
 
 __device__
-Ray refrRay(const vec3& incident, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n)
+void refrRay(Ray& ray, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n)
 {
 	//check for TIR
 	if (sinT2 > 1.0f)
 	{
-		return Ray(false);
+		ray.active = false;
 	}
 
 	const float cosT = sqrt(1.0f - sinT2);
 
-	vec3 w_o = normalize(n * incident + (n * cosI - cosT) * surfel.normal);
+	vec3 w_o = normalize(n * ray.direction + (n * cosI - cosT) * surfel.normal);
 
-	return Ray(surfel.point + (w_o * RAY_BUMP_EPSILON), w_o);
+	ray.origin = surfel.point + (w_o * RAY_BUMP_EPSILON);
+	ray.direction = w_o;
 }
 
 __device__
@@ -495,7 +540,7 @@ int main(int argc, char *argv[])
 {
 	Scene scene;
 
-	vec3 defaultColor(100.f / 255.f, 100.f / 255.f, 100.f / 255.f);
+	vec3 defaultColor(0, 0, 0);
 
 	buildScene(scene);
 
@@ -587,14 +632,14 @@ int main(int argc, char *argv[])
 }
 
 void buildScene(Scene& scene) {
-	//float power = 300;
+	float power = 500;
 
 	//add point light
-	//scene.pointLightsVec.push_back(PointLight(vec3(0, 0.0f, -2.5), vec3(power, power, power)));
-//	scene.pointLightsVec.push_back(PointLight(vec3(2, 1.0f, 0), vec3(power, power, power)));
+	//scene.pointLightsVec.push_back(PointLight(vec3(0, 0.0f, 2.5), vec3(power, power, power)));
+	//scene.pointLightsVec.push_back(PointLight(vec3(2, 9.0f, -5), vec3(power, power, power)));
 
 	//add Spheres
-	addRandomSpheres(scene, 20);
+	addRandomSpheres(scene, 15);
 
 	//add cornell box
 	addCornellBox(scene, 10);
@@ -605,9 +650,15 @@ void addRandomSpheres(Scene& scene, const size_t numSpheres)
 	int matIdx = scene.materialsVec.size();
 
 	//add matrials
-	scene.materialsVec.push_back(Material(vec3(0, 1.0f, 1.0f), 0.9f));
 	scene.materialsVec.push_back(Material(vec3(0.0f, 0.0f, 1.0f), 0.9f));
 	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
+	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f, 
+		vec3(1, 1, 1), INFINITY, 0.9f, 1.4f,
+		vec3(1, 1, 1), .9f));
+	/*scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+		vec3(1, 1, 1), INFINITY, 0.9f, 1.6f));
+	scene.materialsVec[matIdx + 3].pureRefl = true;*/
+
 
 	for (size_t i = 0; i < numSpheres; i++)
 	{
@@ -631,7 +682,11 @@ void addCornellBox(Scene& scene, const float wallSize)
 
 	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 0.8f), 0.9f));	//white			(+0)
 	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));	//red			(+1)
+	//scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.1f, vec3(1, 1, 1), INFINITY, .9f, 1.5f));	//green			(+2)
+	//scene.materialsVec[matIdx + 2].pureRefl = true;
 	scene.materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.9f));	//green			(+2)
+
+
 	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f)));			//white light	(+3)
 
 	const float offset = wallSize / 2;
@@ -669,10 +724,11 @@ void addCornellBox(Scene& scene, const float wallSize)
 	scene.addRectangularModel(trans, matIdx);
 
 	//light
-	trans = translate(vec3(0, offset - 0.001f, -offset * 1.2f)) *
+	float power = 1200;
+	trans = translate(vec3(0, offset - 0.001f, -offset)) *
 		rotate((glm::mediump_float) 90, vec3(1, 0, 0)) *
 		scale(vec3(2.5f, 2.5f, 2.5f));
-	scene.addAreaLight(trans, matIdx + 3, vec3(800, 800, 800));
+	scene.addAreaLight(trans, matIdx + 3, vec3(power, power, power));
 }
 
 //TODO: Clean - doesn't need to be a kernel
@@ -682,38 +738,52 @@ __global__ void moveCamera(Camera *camera, unsigned char key)
 		case 119:
 		{
 					//forward (w)
-					camera->position.z -= .1f;
+					camera->position += camera->rotation * vec3(0, 0, -0.1f);
 					break;
 		}
 		case 97:
 		{
 				   //left (a)
-				   camera->position.x -= .1f;
+				   camera->position += camera->rotation * vec3(-0.1f, 0, 0);
 				   break;
 		}
 		case 115:
 		{
 					//backwards (s)
-					camera->position.z += .1f;
+					camera->position += camera->rotation * vec3(0, 0, 0.1f);
 					break;
 		}
 		case 100:
 		{
 					//right (d)
-					camera->position.x += .1f;
+					camera->position += camera->rotation * vec3(0.1f, 0, 0);
 					break;
 		}
 		case 113:
 		{
 				   //up (q)
-				   camera->position.y += .1f;
+					camera->position += camera->rotation * vec3(0, 0.1f, 0);
 				   break;
 		}
 		case 101:
 		{
 				   //down (e)
-				   camera->position.y -= .1f;
+					camera->position += camera->rotation * vec3(0, -0.1f, 0);
 				   break;
+		}
+		case 102:
+		{
+					//rotate left (f)
+					glm::vec3 rot(0, 10.0*(float)M_PI / 180.0, 0);
+					camera->rotation = glm::normalize(camera->rotation * glm::quat(rot));
+					break;
+		}
+		case 103:
+		{
+					//rotate right (g)
+					glm::vec3 rot(0, -10.0*(float)M_PI / 180.0, 0);
+					camera->rotation = glm::normalize(camera->rotation * glm::quat(rot));
+					break;
 		}
 
 	}

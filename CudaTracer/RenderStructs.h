@@ -86,15 +86,16 @@ struct Material
 	float diffAvg;
 	float specAvg;
 	float refrAvg;
+	bool pureRefl = false;
 
 
 	Material() {};
 
 
 	Material(vec3 diffuseColor, float diffAvg, vec3 specularColor = vec3(0, 0, 0), float specularExponent = 0, float specAvg = 0, 
-		vec3 absorption = vec3(0, 0, 0), float indexOfRefraction = 1.0f, float refrAvg = 0, vec3 emmitance = vec3(0, 0, 0)) :
+		float indexOfRefraction = 1.0f, vec3 absorption = vec3(0, 0, 0), float refrAvg = 0, vec3 emmitance = vec3(0, 0, 0)) :
 			diffuseColor(diffuseColor), diffAvg(diffAvg), specularColor(specularColor), specularExponent(specularExponent), specAvg(specAvg), 
-			absorption(absorption), indexOfRefraction(indexOfRefraction), refrAvg(refrAvg), emmitance(emmitance) {};
+			absorption(absorption), indexOfRefraction(indexOfRefraction), refrAvg(refrAvg), emmitance(emmitance), pureRefl(false) {};
 
 	explicit Material(vec3 emmitance) :
 		diffuseColor(vec3(0, 0, 0)), diffAvg(0), specularColor(vec3(0, 0, 0)), specularExponent(0), specAvg(0),
