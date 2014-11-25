@@ -1,11 +1,9 @@
 #include "Scene.h"
 
-#define rnd(x) (x * rand() / RAND_MAX)
-
 #define INVERSE_255 0.00392156862f
 #define INVERSE_PI 0.31830988618f
 
-#define RAY_BUMP_EPSILON 5e-5f
+#define RAY_BUMP_EPSILON 1e-4f
 
 
 /// <summary>
@@ -30,9 +28,18 @@ struct RendererData
 	unsigned int maxIterations = 10;
 };
 
-void buildScene(Scene& scene);
-void addRandomSpheres(Scene& scene, const size_t numSpheres);
-void addCornellBox(Scene& scene, const float wallSize);
+/// <summary>
+/// A struct containing all the data to be used by the entire program.
+/// </summary>
+struct ProgramData
+{
+	RendererData renderData;
+	Camera camera;
+	int lastResetTick;
+	unsigned int maxIterations = 10;
+	bool resetTicksThisFrame;
+	bool usePathTracer;
+};
 
 void generateFrame(uchar4 *pixels, void*, int ticks);
 void Key(unsigned char key, int x, int y);
@@ -47,7 +54,7 @@ __device__
 vec3 getAreaLightPoint(const AreaLight& light, Triangle* triangles, curandState& state);
 
 __device__
-bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2);
+bool lineOfSight(const RendererData& data, const vec3& normal, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2);
 
 __device__
 float computeFresnelForReflectance(const float cosI, const float sinT2, const float n1, const float n2, const float n);

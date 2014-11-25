@@ -75,8 +75,8 @@ public:
 
 	Sphere(){};
 
-	Sphere(vec3 position, float radius) :
-		radius(radius), position(position) {};
+	Sphere(vec3 position, float radius, int materialIdx) :
+		radius(radius), position(position), materialIdx(materialIdx){};
 
 	__device__
 	SurfaceElement getSurfaceElement(const Ray& ray, float distance) const

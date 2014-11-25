@@ -63,7 +63,7 @@ struct GPUAnimBitmap
 		glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
 		glutInitWindowSize(DIM, DIM);
 		glutInitWindowPosition(300, 200);
-		glutCreateWindow("bitmap");
+		glutCreateWindow("PathTracerSS");
 
 		glewInit();
 

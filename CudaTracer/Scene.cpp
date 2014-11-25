@@ -1,5 +1,6 @@
 #include "Scene.h"
 
+#define rnd(x) (x * rand() / RAND_MAX)
 
 Scene::Scene()
 {
@@ -8,6 +9,24 @@ Scene::Scene()
 
 Scene::~Scene()
 {
+}
+
+/// <summary>
+/// Builds the scene by calling other scene building functions
+/// </summary>
+void Scene::build() {
+	float power = 500;
+
+	//add point light
+	//scene.pointLightsVec.push_back(PointLight(vec3(0, 0.0f, 2.5), vec3(power, power, power)));
+	//scene.pointLightsVec.push_back(PointLight(vec3(2, 9.0f, -5), vec3(power, power, power)));
+
+	//add Spheres
+	//addRandomSpheres(15);
+	addDefinedSpheres(4);
+
+	//add cornell box
+	addCornellBox(8);
 }
 
 /// <summary>
@@ -75,4 +94,110 @@ void Scene::addRectangularModel(mat4 transformation, int materialIdx)
 	//push triangle into vector
 	trianglesVec.push_back(Triangle(vertexes[0], vertexes[1], vertexes[2], normal, normal, normal, materialIdx));
 	trianglesVec.push_back(Triangle(vertexes[3], vertexes[1], vertexes[2], normal, normal, normal, materialIdx));
+}
+
+void Scene::addDefinedSpheres(const float size) {
+	int matIdx = materialsVec.size();
+
+	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+		vec3(1, 1, 1), INFINITY, 0.9f, 1.4f,
+		vec3(.15, .15, 0), .9f));
+
+	spheresVec.push_back(Sphere(vec3(-2, -(size - 1.5f), -(size * 1.3f)), 1.5f, matIdx + 1));
+	spheresVec.push_back(Sphere(vec3(1, -(size - 1.f), -(size * 1.4f)), 1.f, matIdx));
+}
+
+/// <summary>
+/// Adds a set of random spheres.  Because the randomness is unseeded, the same spheres will appear every time
+/// </summary>
+/// <param name="numSpheres">The number spheres.</param>
+void Scene::addRandomSpheres(const size_t numSpheres)
+{
+	int matIdx = materialsVec.size();
+
+	//add matrials
+	materialsVec.push_back(Material(vec3(0.0f, 0.0f, 1.0f), 0.9f));
+	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+		vec3(1, 1, 1), INFINITY, 0.9f, 1.4f,
+		vec3(1, 1, 1), .9f));
+	/*scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+	vec3(1, 1, 1), INFINITY, 0.9f, 1.6f));
+	scene.materialsVec[matIdx + 3].pureRefl = true;*/
+
+
+	for (size_t i = 0; i < numSpheres; i++)
+	{
+		Sphere s;
+
+		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(5.0f) - 8.0f);
+		s.radius = rnd(0.5f) + 0.5f;
+		s.materialIdx = matIdx + (i % 3);
+
+		spheresVec.push_back(s);
+	}
+}
+
+/// <summary>
+/// Adds a cornell box of a given size, centered at 0, with no back.
+/// </summary>
+/// <param name="wallSize">Size of the walls.</param>
+void Scene::addCornellBox(const float wallSize)
+{
+	using glm::translate;
+	using glm::scale;
+	using glm::rotate;
+
+	int matIdx = materialsVec.size();
+
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 0.8f), 0.9f));	//white			(+0)
+	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));	//red			(+1)
+	//materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.1f, vec3(1, 1, 1), INFINITY, .9f, 1.5f));	//green			(+2)
+	//materialsVec[matIdx + 2].pureRefl = true;
+	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.9f));	//green			(+2)
+
+
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f)));			//white light	(+3)
+
+	const float offset = wallSize / 2;
+
+	const mat4 scaleToWall = scale(vec3(wallSize, wallSize, wallSize));
+
+	//floor
+	mat4 trans = translate(vec3(0, -offset, -offset)) *
+		rotate(-(glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx);
+
+	//ceiling
+	trans = translate(vec3(0, offset, -offset)) *
+		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx);
+
+	//left wall
+	trans = translate(vec3(-offset, 0, -offset)) *
+		rotate((glm::mediump_float)90, vec3(0, 1, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx + 1);
+
+	//right wall
+	trans = translate(vec3(offset, 0, -offset)) *
+		rotate((glm::mediump_float) - 90, vec3(0, 1, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx + 2);
+
+	//back wall
+	trans = translate(vec3(0, 0, -wallSize)) *
+		//		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx);
+
+	//light
+	float power = 1200;
+	trans = translate(vec3(0, offset - 0.001f, -offset)) *
+		rotate((glm::mediump_float) 90, vec3(1, 0, 0)) *
+		scale(vec3(2.5f, 2.5f, 2.5f));
+	addAreaLight(trans, matIdx + 3, vec3(power, power, power));
 }

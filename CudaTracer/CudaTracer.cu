@@ -142,9 +142,6 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 
 		float cosI = dot(-ray.direction, surfel.normal);
 
-		//if cosI is positive, ray is inside of primitive 
-		bool inside = cosI < 0.0f;
-
 
 
 		//--------------------------
@@ -158,8 +155,8 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 		//emit if material is emitter
 		directRadiance += material.emmitance;
 
-		//calculate direct light
-		if (!inside) {
+		//calculate direct light, iff ray is not inside of primitive
+		if (cosI >= 0.0f) {
 			directRadiance += shade(data, surfel, material, localState);
 		}
 
@@ -191,7 +188,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 				vec3 L(0, 0, 0);
 				vec3 w_o = cosHemiRandom(surfel.normal, localState);
 
-				ray.origin = surfel.point + RAY_BUMP_EPSILON * w_o;
+				ray.origin = surfel.point + RAY_BUMP_EPSILON * surfel.normal;
 				ray.direction = w_o;
 
 				indirectRadiance = material.diffuseColor;
@@ -218,7 +215,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 				if (material.specularExponent != INFINITY) {
 					ray.direction = cosHemiRandomPhong(ray.direction, material.specularExponent, localState);
 
-					ray.origin = surfel.point + (RAY_BUMP_EPSILON * ray.direction);
+					ray.origin = surfel.point + (RAY_BUMP_EPSILON * surfel.normal);
 				}
 				//mirror reflectance otherwise.  Nothing to do
 
@@ -237,6 +234,9 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 				refrRay(ray, surfel, cosI, sinT2, n);
 
 				//TODO: Apply Beer's law
+				indirectRadiance.x = expf(-distance * material.absorption.x);
+				indirectRadiance.y = expf(-distance * material.absorption.y);
+				indirectRadiance.z = expf(-distance * material.absorption.z);
 			}
 		}
 
@@ -301,7 +301,7 @@ vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Materia
 	{
 		PointLight light = data.pointLights[i];
 
-		if (lineOfSight(data, surfel.point, light.position, w_i, distance2))
+		if (lineOfSight(data, surfel.normal, surfel.point, light.position, w_i, distance2))
 		{
 			const vec3 L_i = light.power / float(4 * M_PI * distance2);
 
@@ -320,7 +320,7 @@ vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Materia
 
 		vec3 point = getAreaLightPoint(light, data.triangles, state);
 
-		if (lineOfSight(data, surfel.point, point, w_i, distance2))
+		if (lineOfSight(data, surfel.normal, surfel.point, point, w_i, distance2))
 		{
 			const vec3 L_i = light.power / float(4 * M_PI * distance2);
 
@@ -357,7 +357,7 @@ vec3 getAreaLightPoint(const AreaLight& light, Triangle* triangles, curandState&
 }
 
 __device__
-bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2)
+bool lineOfSight(const RendererData& data, const vec3& normal, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2)
 {
 	const vec3 offset = point1 - point0;
 	distance2 = dot(offset, offset);
@@ -365,10 +365,10 @@ bool lineOfSight(const RendererData& data, const vec3& point0, const vec3& point
 
 	w_i = offset / distance;
 
-	const Ray losRay(point0 + (RAY_BUMP_EPSILON * w_i), w_i);
+	const Ray losRay(point0 + (RAY_BUMP_EPSILON * normal), w_i);
 
 	//shorten distance.
-	distance -= RAY_BUMP_EPSILON;
+	distance -= 2 * RAY_BUMP_EPSILON;
 
 	//loop through all primitives, seeing if any intersections occur
 	SurfaceElement surfel;
@@ -441,7 +441,7 @@ void reflRay(Ray& ray, const SurfaceElement& surfel, const float cosI)
 {
 	vec3 w_o = ray.direction - 2 * (-cosI) * surfel.normal;
 
-	ray.origin = surfel.point + (w_o * RAY_BUMP_EPSILON);
+	ray.origin = surfel.point + (surfel.normal * RAY_BUMP_EPSILON);
 	ray.direction = w_o;
 }
 
@@ -542,7 +542,7 @@ int main(int argc, char *argv[])
 
 	vec3 defaultColor(0, 0, 0);
 
-	buildScene(scene);
+	scene.build();
 
 	Camera *camera;
 	PointLight *pointLights;
@@ -629,106 +629,6 @@ int main(int argc, char *argv[])
 	delete data;
 
 	return 0;
-}
-
-void buildScene(Scene& scene) {
-	float power = 500;
-
-	//add point light
-	//scene.pointLightsVec.push_back(PointLight(vec3(0, 0.0f, 2.5), vec3(power, power, power)));
-	//scene.pointLightsVec.push_back(PointLight(vec3(2, 9.0f, -5), vec3(power, power, power)));
-
-	//add Spheres
-	addRandomSpheres(scene, 15);
-
-	//add cornell box
-	addCornellBox(scene, 10);
-}
-
-void addRandomSpheres(Scene& scene, const size_t numSpheres)
-{
-	int matIdx = scene.materialsVec.size();
-
-	//add matrials
-	scene.materialsVec.push_back(Material(vec3(0.0f, 0.0f, 1.0f), 0.9f));
-	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
-	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f, 
-		vec3(1, 1, 1), INFINITY, 0.9f, 1.4f,
-		vec3(1, 1, 1), .9f));
-	/*scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
-		vec3(1, 1, 1), INFINITY, 0.9f, 1.6f));
-	scene.materialsVec[matIdx + 3].pureRefl = true;*/
-
-
-	for (size_t i = 0; i < numSpheres; i++)
-	{
-		Sphere s;
-
-		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(5.0f) - 8.0f);
-		s.radius = rnd(0.5f) + 0.5f;
-		s.materialIdx = matIdx + (i % 3);
-
-		scene.spheresVec.push_back(s);
-	}
-}
-
-void addCornellBox(Scene& scene, const float wallSize)
-{
-	using glm::translate;
-	using glm::scale;
-	using glm::rotate;
-	
-	int matIdx = scene.materialsVec.size();
-
-	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 0.8f), 0.9f));	//white			(+0)
-	scene.materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));	//red			(+1)
-	//scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.1f, vec3(1, 1, 1), INFINITY, .9f, 1.5f));	//green			(+2)
-	//scene.materialsVec[matIdx + 2].pureRefl = true;
-	scene.materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.9f));	//green			(+2)
-
-
-	scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f)));			//white light	(+3)
-
-	const float offset = wallSize / 2;
-
-	const mat4 scaleToWall = scale(vec3(wallSize, wallSize, wallSize));
-
-	//floor
-	mat4 trans = translate(vec3(0, -offset, -offset)) *
-		rotate(-(glm::mediump_float)90, vec3(1, 0, 0)) *
-		scaleToWall;
-	scene.addRectangularModel(trans, matIdx);
-
-	//ceiling
-	trans = translate(vec3(0, offset, -offset)) *
-		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
-		scaleToWall;
-	scene.addRectangularModel(trans, matIdx);
-
-	//left wall
-	trans = translate(vec3(-offset, 0, -offset)) *
-		rotate((glm::mediump_float)90, vec3(0, 1, 0)) *
-		scaleToWall;
-	scene.addRectangularModel(trans, matIdx + 1);
-
-	//right wall
-	trans = translate(vec3(offset, 0, -offset)) *
-		rotate((glm::mediump_float)-90, vec3(0, 1, 0)) *
-		scaleToWall;
-	scene.addRectangularModel(trans, matIdx + 2);
-
-	//back wall
-	trans = translate(vec3(0, 0, -wallSize)) *
-//		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
-		scaleToWall;
-	scene.addRectangularModel(trans, matIdx);
-
-	//light
-	float power = 1200;
-	trans = translate(vec3(0, offset - 0.001f, -offset)) *
-		rotate((glm::mediump_float) 90, vec3(1, 0, 0)) *
-		scale(vec3(2.5f, 2.5f, 2.5f));
-	scene.addAreaLight(trans, matIdx + 3, vec3(power, power, power));
 }
 
 //TODO: Clean - doesn't need to be a kernel

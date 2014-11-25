@@ -17,5 +17,10 @@ public:
 	void addRectangularModel(mat4 transformation, int materialIdx);
 
 	void addAreaLight(mat4 transformation, int materialIdx, vec3 power);
+
+	void build();
+	void addRandomSpheres(const size_t numSpheres);
+	void addCornellBox(const float wallSize);
+	void addDefinedSpheres(const float size);
 };
 
