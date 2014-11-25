@@ -99,9 +99,10 @@ void Scene::addRectangularModel(mat4 transformation, int materialIdx)
 void Scene::addDefinedSpheres(const float size) {
 	int matIdx = materialsVec.size();
 
-	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
+	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.45f, vec3(1, 1, 1), 50, 0.45, 1.7f));
+	materialsVec[matIdx].pureRefl = true;
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
-		vec3(1, 1, 1), INFINITY, 0.9f, 1.4f,
+		vec3(1, 1, 1), 300, 0.9f, 1.55f,
 		vec3(.15, .15, 0), .9f));
 
 	spheresVec.push_back(Sphere(vec3(-2, -(size - 1.5f), -(size * 1.3f)), 1.5f, matIdx + 1));
@@ -120,7 +121,7 @@ void Scene::addRandomSpheres(const size_t numSpheres)
 	materialsVec.push_back(Material(vec3(0.0f, 0.0f, 1.0f), 0.9f));
 	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
-		vec3(1, 1, 1), INFINITY, 0.9f, 1.4f,
+		vec3(1, 1, 1), INFINITY, 0.9f, 1.55f,
 		vec3(1, 1, 1), .9f));
 	/*scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
 	vec3(1, 1, 1), INFINITY, 0.9f, 1.6f));

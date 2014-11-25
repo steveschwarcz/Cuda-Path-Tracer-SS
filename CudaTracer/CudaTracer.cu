@@ -42,12 +42,12 @@ __global__ void clearPixels(uchar4 *pixels) {
 	pixels[offset] = newPixel;
 }
 
-__global__ void computeEyeRaysKernel(Camera *camera, Ray* rays, curandState* states) {
+__global__ void computeEyeRaysKernel(Camera camera, Ray* rays, curandState* states) {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
 
-	Ray ray = computeEyeRay(x, y, DIM, DIM, *camera, states[offset]);
+	Ray ray = computeEyeRay(x, y, DIM, DIM, camera, states[offset]);
 
 	ray.pixelOffset = offset;
 
@@ -514,7 +514,7 @@ const quat rotateVectorToVector(const vec3& source, const vec3& target)
 
 void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 {
-	RendererData *data = (RendererData *)dataBlock;
+	ProgramData *data = (ProgramData *)dataBlock;
 
 	//TODO: Implement a way to reset ticks when moving
 
@@ -522,35 +522,40 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
 
-	//if reset tick is -1, it means that this frame the ticks are being reset
-	if (data->resetTick == -1) {
-		data->resetTick = ticks;
+	//if necessary, clear the pixels and reset the number of ticks
+	if (data->resetTicksThisFrame) {
+		data->lastResetTick = ticks;
 
 		clearPixels<<<grids, threads>>>(pixels);
+
+		data->resetTicksThisFrame = false;
 	}
 
 	//create the rays
-	computeEyeRaysKernel <<<grids, threads>>> (data->camera, data->rays, data->curandStates);
+	computeEyeRaysKernel << <grids, threads >> > (data->camera, data->renderData.rays, data->renderData.curandStates);
 
 	int numRays = DIM * DIM;
 	
 	//fire n rays per pixel
-	for (unsigned int i = 0; i < data->maxIterations; i++) {
+	//number of iterations is only one if set to use ray tracing
+	int numIterations = data->usePathTracer ? data->maxIterations : 1;
+	for (unsigned int i = 0; i < numIterations; i++) {
 		dim3 rayGrids(numRays / 256);
-		pathTraceKernel << < rayGrids, rayThreads >> >(pixels, *data, i);
+		pathTraceKernel << < rayGrids, rayThreads >> >(pixels, data->renderData, i);
 
 		//Stream compaction
-		thrust::device_ptr<Ray> dev_ray_ptr(data->rays);
+		thrust::device_ptr<Ray> dev_ray_ptr(data->renderData.rays);
 		thrust::device_ptr<Ray> partitionRay = thrust::partition(dev_ray_ptr, dev_ray_ptr + numRays, ray_is_active());
 
 		numRays = partitionRay - dev_ray_ptr;
 	}
 
-	std::cout << "Rays per pixel: " << ticks - data->resetTick << "\r";
+	//output number of rays cast thus far
+	std::cout << "Rays per pixel: " << ticks - data->lastResetTick << "\r";
 	std::cout.flush();
 
 	//write results to buffer
-	writeToPixelsKernel <<<grids, threads>>>(pixels, data->rays, ticks - data->resetTick);
+	writeToPixelsKernel << <grids, threads >> >(pixels, data->renderData.rays, ticks - data->lastResetTick);
 }
 
 int main(int argc, char *argv[])
@@ -561,7 +566,6 @@ int main(int argc, char *argv[])
 
 	scene.build();
 
-	Camera *camera;
 	PointLight *pointLights;
 	AreaLight *areaLights;
 	Ray* rays;
@@ -571,13 +575,10 @@ int main(int argc, char *argv[])
 	curandState* curandStates;
 
 	//initialize bitmap and data
-	RendererData *data = new RendererData();
+	ProgramData *data = new ProgramData();
 	GPUAnimBitmap bitmap(DIM, DIM, data);
 
 	//allocate GPU pointers
-	CUDA_ERROR_HANDLE(cudaMalloc((void**)&camera,
-		sizeof(Camera)));
-
 	CUDA_ERROR_HANDLE(cudaMalloc((void**)&pointLights,
 		sizeof(PointLight)* scene.pointLightsVec.size()));
 
@@ -598,12 +599,8 @@ int main(int argc, char *argv[])
 
 	CUDA_ERROR_HANDLE(cudaMalloc(&curandStates, 
 		sizeof(curandState)* DIM *DIM));
-	
-	//initialize values
-	Camera temp_c = Camera();
 
 	//copy data to GPU
-	CUDA_ERROR_HANDLE(cudaMemcpy(camera, &temp_c, sizeof(Camera), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(spheres, scene.spheresVec.data(), sizeof(Sphere)* scene.spheresVec.size(), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(triangles, scene.trianglesVec.data(), sizeof(Triangle)* scene.trianglesVec.size(), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(pointLights, scene.pointLightsVec.data(), sizeof(PointLight)* scene.pointLightsVec.size(), cudaMemcpyHostToDevice));
@@ -611,19 +608,19 @@ int main(int argc, char *argv[])
 	CUDA_ERROR_HANDLE(cudaMemcpy(materials, scene.materialsVec.data(), sizeof(Material)* scene.materialsVec.size(), cudaMemcpyHostToDevice));
 
 	//put values in a data block
-	data->camera = camera;
-	data->pointLights = pointLights;
-	data->numPointLights = scene.pointLightsVec.size();
-	data->areaLights = areaLights;
-	data->numAreaLights = scene.areaLightsVec.size();
-	data->spheres = spheres;
-	data->numSpheres = scene.spheresVec.size();
-	data->triangles = triangles;
-	data->numTriangles = scene.trianglesVec.size();
-	data->rays = rays;
-	data->materials = materials;
-	data->defaultColor = defaultColor;
-	data->curandStates = curandStates;
+	data->camera = Camera();
+	data->renderData.pointLights = pointLights;
+	data->renderData.numPointLights = scene.pointLightsVec.size();
+	data->renderData.areaLights = areaLights;
+	data->renderData.numAreaLights = scene.areaLightsVec.size();
+	data->renderData.spheres = spheres;
+	data->renderData.numSpheres = scene.spheresVec.size();
+	data->renderData.triangles = triangles;
+	data->renderData.numTriangles = scene.trianglesVec.size();
+	data->renderData.rays = rays;
+	data->renderData.materials = materials;
+	data->renderData.defaultColor = defaultColor;
+	data->renderData.curandStates = curandStates;
 
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
@@ -634,7 +631,6 @@ int main(int argc, char *argv[])
 	bitmap.anim_and_exit((void(*)(uchar4*, void*, int))generateFrame, NULL, (void(*)(unsigned char, int, int))Key);
 
 	//free
-	CUDA_ERROR_HANDLE(cudaFree(camera));
 	CUDA_ERROR_HANDLE(cudaFree(pointLights));
 	CUDA_ERROR_HANDLE(cudaFree(areaLights));
 	CUDA_ERROR_HANDLE(cudaFree(spheres));
@@ -648,63 +644,6 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-//TODO: Clean - doesn't need to be a kernel
-__global__ void moveCamera(Camera *camera, unsigned char key)
-{
-	switch (key) {
-		case 119:
-		{
-					//forward (w)
-					camera->position += camera->rotation * vec3(0, 0, -0.1f);
-					break;
-		}
-		case 97:
-		{
-				   //left (a)
-				   camera->position += camera->rotation * vec3(-0.1f, 0, 0);
-				   break;
-		}
-		case 115:
-		{
-					//backwards (s)
-					camera->position += camera->rotation * vec3(0, 0, 0.1f);
-					break;
-		}
-		case 100:
-		{
-					//right (d)
-					camera->position += camera->rotation * vec3(0.1f, 0, 0);
-					break;
-		}
-		case 113:
-		{
-				   //up (q)
-					camera->position += camera->rotation * vec3(0, 0.1f, 0);
-				   break;
-		}
-		case 101:
-		{
-				   //down (e)
-					camera->position += camera->rotation * vec3(0, -0.1f, 0);
-				   break;
-		}
-		case 102:
-		{
-					//rotate left (f)
-					glm::vec3 rot(0, 10.0*(float)M_PI / 180.0, 0);
-					camera->rotation = glm::normalize(camera->rotation * glm::quat(rot));
-					break;
-		}
-		case 103:
-		{
-					//rotate right (g)
-					glm::vec3 rot(0, -10.0*(float)M_PI / 180.0, 0);
-					camera->rotation = glm::normalize(camera->rotation * glm::quat(rot));
-					break;
-		}
-
-	}
-}
 
 
 // static method used for glut callbacks
@@ -720,9 +659,93 @@ void Key(unsigned char key, int x, int y) {
 			   bitmap->free_resources();
 			   exit(0);
 		}
+		case 32:
+		{
+				   //space bar pressed: switch between path tracer and rudimentary ray tracer
+			   ((ProgramData*)bitmap->dataBlock)->usePathTracer = !((ProgramData*)bitmap->dataBlock)->usePathTracer;
+		}
 	}
 
-	((RendererData*)bitmap->dataBlock)->resetTick = -1;
+	((ProgramData*)bitmap->dataBlock)->resetTicksThisFrame = true;
 
-	moveCamera <<< 1, 1 >>>(((RendererData*)bitmap->dataBlock)->camera, key);
+	moveCamera(((ProgramData*)bitmap->dataBlock)->camera, key);
+}
+
+
+/// <summary>
+/// Moves the camera.
+/// </summary>
+/// <param name="camera">The camera.</param>
+/// <param name="key">The key that was pressed to move the camera.</param>
+void moveCamera(Camera& camera, unsigned char key)
+{
+	float moveDist = .2f, rotateDist = 10.0*(float)M_PI / 180.0;
+
+	switch (key) {
+	case 119:
+	{
+				//forward (w)
+				camera.position += camera.rotation * vec3(0, 0, -moveDist);
+				break;
+	}
+	case 97:
+	{
+			   //left (a)
+			   camera.position += camera.rotation * vec3(-moveDist, 0, 0);
+			   break;
+	}
+	case 115:
+	{
+				//backwards (s)
+				camera.position += camera.rotation * vec3(0, 0, moveDist);
+				break;
+	}
+	case 100:
+	{
+				//right (d)
+				camera.position += camera.rotation * vec3(moveDist, 0, 0);
+				break;
+	}
+	case 113:
+	{
+				//up (q)
+				camera.position += camera.rotation * vec3(0, moveDist, 0);
+				break;
+	}
+	case 101:
+	{
+				//down (e)
+				camera.position += camera.rotation * vec3(0, -moveDist, 0);
+				break;
+	}
+	case 102:
+	{
+				//rotate left (f)
+				vec3 rot(0, rotateDist, 0);
+				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
+				break;
+	}
+	case 104:
+	{
+				//rotate right (h)
+				vec3 rot(0, -rotateDist, 0);
+				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
+				break;
+	}
+	case 103:
+	{
+				//rotate down (g)
+				vec3 rot(-rotateDist, 0, 0);
+				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
+				break;
+	}
+	case 116:
+	{
+				//rotate up (t)
+				vec3 rot(rotateDist, 0, 0);
+				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
+				break;
+	}
+
+	}
 }

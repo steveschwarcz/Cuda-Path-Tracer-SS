@@ -12,7 +12,6 @@
 struct RendererData
 {
 	vec3 defaultColor;
-	Camera *camera;
 	PointLight *pointLights;
 	size_t numPointLights;
 	AreaLight *areaLights;
@@ -24,8 +23,6 @@ struct RendererData
 	size_t numTriangles;
 	Material* materials;
 	curandState* curandStates;
-	int resetTick = -1;
-	unsigned int maxIterations = 10;
 };
 
 /// <summary>
@@ -38,11 +35,12 @@ struct ProgramData
 	int lastResetTick;
 	unsigned int maxIterations = 10;
 	bool resetTicksThisFrame;
-	bool usePathTracer;
+	bool usePathTracer = true;
 };
 
 void generateFrame(uchar4 *pixels, void*, int ticks);
 void Key(unsigned char key, int x, int y);
+void moveCamera(Camera& camera, unsigned char key);
 
 __device__
 Ray computeEyeRay(int x, int y, int dimX, int dimY, const Camera& camera, curandState& state);
