@@ -42,7 +42,7 @@ __global__ void clearPixels(uchar4 *pixels) {
 	pixels[offset] = newPixel;
 }
 
-__global__ void createEyeRays(Camera *camera, Ray* rays, curandState* states) {
+__global__ void computeEyeRaysKernel(Camera *camera, Ray* rays, curandState* states) {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
@@ -54,7 +54,7 @@ __global__ void createEyeRays(Camera *camera, Ray* rays, curandState* states) {
 	rays[offset] = ray;
 }
 
-__global__ void writeToPixels(uchar4 *pixels, Ray* rays, int ticks) {
+__global__ void writeToPixelsKernel(uchar4 *pixels, Ray* rays, int ticks) {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
@@ -150,13 +150,14 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 			//get material
 		Material material = data.materials[surfel.materialIdx];
 
-		vec3 directRadiance(0, 0, 0), indirectRadiance(1, 1, 1);
+		vec3 directRadiance(0, 0, 0);
 
 		//emit if material is emitter
 		directRadiance += material.emmitance;
 
 		//calculate direct light, iff ray is not inside of primitive
-		if (cosI >= 0.0f) {
+		bool inside = cosI < 0.0f;
+		if (!inside) {
 			directRadiance += shade(data, surfel, material, localState);
 		}
 
@@ -164,87 +165,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 		//--------------------------
 		//		Scattering
 		//--------------------------
-
-		//both indexes of refraction, n1 / n2, and sin T squared
-		float n1, n2, n, sinT2;
-
-		//compute values that will be needed later
-		computeSinT2AndRefractiveIndexes(material.indexOfRefraction, cosI, sinT2, n1, n2, n);
-
-		//compute fresnel
-		const float fresnelReflective = computeFresnelForReflectance(cosI, sinT2, n1, n2, n);
-
-		float r = curand_uniform(&localState);
-
-		//first check for diffuse indirect light
-		if (material.diffAvg > 0.0f)
-		{
-			//diffuse reflection
-			r -= material.diffAvg;
-
-			if (r < 0.0f)
-			{
-
-				vec3 L(0, 0, 0);
-				vec3 w_o = cosHemiRandom(surfel.normal, localState);
-
-				ray.origin = surfel.point + RAY_BUMP_EPSILON * surfel.normal;
-				ray.direction = w_o;
-
-				indirectRadiance = material.diffuseColor;
-			}
-
-		}
-		//reflective indirect light
-		if (r > 0 && material.specAvg > 0.0f)
-		{
-			//glossy reflection
-			/*if (material.pureRefl) {
-				r -= material.specAvg;
-			}
-			else {*/
-				r -= material.specAvg * fresnelReflective;
-			//}
-
-			if (r < 0.0f)
-			{
-				reflRay(ray, surfel, cosI);
-
-				//TODO: Reference paper
-				//glossy phong scattering
-				if (material.specularExponent != INFINITY) {
-					ray.direction = cosHemiRandomPhong(ray.direction, material.specularExponent, localState);
-
-					ray.origin = surfel.point + (RAY_BUMP_EPSILON * surfel.normal);
-				}
-				//mirror reflectance otherwise.  Nothing to do
-
-				indirectRadiance = material.specularColor;
-			}
-		}
-		if (r > 0 && material.refrAvg > 0.0f)
-		{
-			const float fresnelRefractive = 1.0f - fresnelReflective;
-
-			//refraction
-			r -= material.refrAvg * fresnelRefractive;
-
-			if (r < 0.0f)
-			{
-				refrRay(ray, surfel, cosI, sinT2, n);
-
-				//TODO: Apply Beer's law
-				indirectRadiance.x = expf(-distance * material.absorption.x);
-				indirectRadiance.y = expf(-distance * material.absorption.y);
-				indirectRadiance.z = expf(-distance * material.absorption.z);
-			}
-		}
-
-		if (r > 0) {
-			//ray was absorbed
-			indirectRadiance = vec3(0, 0, 0);
-			ray.active = false;
-		}
+		vec3 indirectRadiance = computeIndirectRadianceAndScatter(ray, surfel, material, cosI, distance, inside, localState);
 
 		//save radiance
 		ray.radiance0 += ray.radiance1 * directRadiance;
@@ -253,7 +174,6 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 	else
 	{
 		//ray completely missed
-		ray.radiance1 *= data.defaultColor;
 		ray.active = false;
 	}
 
@@ -264,6 +184,100 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 	//save the ray
 	data.rays[offset] = ray;
 }
+
+__device__
+vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, const Material& material, float cosI, const float distance, const bool inside, curandState& localState)
+{
+
+	//both indexes of refraction, n1 / n2, and sin T squared
+	float n1, n2, n, sinT2;
+
+	//compute values that will be needed later
+	computeSinT2AndRefractiveIndexes(material.indexOfRefraction, cosI, sinT2, n1, n2, n);
+
+	//compute fresnel
+	const float fresnelReflective = computeFresnelForReflectance(cosI, sinT2, n1, n2, n);
+
+	float r = curand_uniform(&localState);
+
+	//--------------------------
+	//		Diffuse
+	//--------------------------
+	if (material.diffAvg > 0.0f)
+	{
+		r -= material.diffAvg;
+
+		if (r < 0.0f)
+		{
+			ray.origin = surfel.point + RAY_BUMP_EPSILON * surfel.normal;
+			ray.direction = cosHemiRandom(surfel.normal, localState);
+
+			return material.diffuseColor;
+		}
+
+	}
+	//--------------------------
+	//		Reflected
+	//--------------------------
+	if (material.specAvg > 0.0f)
+	{
+		//glossy reflection
+		if (material.pureRefl) {
+			//pure reflectance: do not compute fresnel
+			r -= material.specAvg;
+		}
+		else {
+			//include fresnel
+			r -= material.specAvg * fresnelReflective;
+		}
+
+		if (r < 0.0f)
+		{
+			reflRay(ray, surfel, cosI);
+
+			//TODO: Reference paper
+			//glossy scattering
+			if (material.specularExponent != INFINITY) {
+				//use an importance sampled ray to determine which way the ray ought to travel
+				ray.direction = cosHemiRandomPhong(ray.direction, material.specularExponent, localState);
+			}
+			//mirror reflectance otherwise.  Nothing to do
+
+			return material.specularColor;
+		}
+	}
+	//--------------------------
+	//		Refracted
+	//--------------------------
+	if (material.refrAvg > 0.0f)
+	{
+		const float fresnelRefractive = 1.0f - fresnelReflective;
+
+		//refraction
+		r -= material.refrAvg * fresnelRefractive;
+
+		if (r < 0.0f)
+		{
+			refrRay(ray, surfel, cosI, sinT2, n);
+
+			//Apply Beer's law
+			if (inside)
+			{
+				return vec3(
+					expf(-distance * material.absorption.x),
+					expf(-distance * material.absorption.y),
+					expf(-distance * material.absorption.z));
+			}
+			//not inside, no need for absorption 
+			return vec3(1, 1, 1);
+		}
+	}
+
+	//ray was absorbed
+	ray.active = false;
+	return vec3(0, 0, 0);
+}
+
 
 __device__ 
 Ray computeEyeRay(int x, int y, int dimX, int dimY, const Camera& camera, curandState& state)
@@ -516,7 +530,7 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	}
 
 	//create the rays
-	createEyeRays <<<grids, threads>>> (data->camera, data->rays, data->curandStates);
+	computeEyeRaysKernel <<<grids, threads>>> (data->camera, data->rays, data->curandStates);
 
 	int numRays = DIM * DIM;
 	
@@ -536,7 +550,7 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	std::cout.flush();
 
 	//write results to buffer
-	writeToPixels <<<grids, threads>>>(pixels, data->rays, ticks - data->resetTick);
+	writeToPixelsKernel <<<grids, threads>>>(pixels, data->rays, ticks - data->resetTick);
 }
 
 int main(int argc, char *argv[])

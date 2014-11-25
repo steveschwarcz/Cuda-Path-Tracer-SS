@@ -57,6 +57,9 @@ __device__
 bool lineOfSight(const RendererData& data, const vec3& normal, const vec3& point0, const vec3& point1, vec3& w_i, float& distance2);
 
 __device__
+vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, const Material& material, float cosI, const float distance, const bool inside, curandState& localState);
+
+__device__
 float computeFresnelForReflectance(const float cosI, const float sinT2, const float n1, const float n2, const float n);
 
 __device__
