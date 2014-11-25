@@ -552,7 +552,7 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	}
 
 	//output number of rays cast thus far
-	std::cout << "Rays per pixel: " << ticks - data->lastResetTick << "\r";
+	std::cout << "Rays per pixel: " << ticks - data->lastResetTick << "     \r";
 	std::cout.flush();
 
 	//write results to buffer
@@ -669,11 +669,15 @@ void Key(unsigned char key, int x, int y) {
 		case 48:
 		{
 				   //0 key pressed.  save image to file, with filename taken from current time
+
+				   //get time
 				   time_t     now = time(0);
 				   struct tm  tstruct;
 				   char       buf[160];
 				   tstruct = *localtime(&now);
-				   strftime(buf, sizeof(buf), "render%Y-%m-%d-%H%M%S.tga", &tstruct);
+
+				   //get filename from time
+				   strftime(buf, sizeof(buf), "renders/render%Y-%m-%d-%H%M%S.tga", &tstruct);
 				   saveScreenshot(buf, DIM, DIM);
 		}
 	}
@@ -724,70 +728,45 @@ bool moveCamera(Camera& camera, unsigned char key)
 
 	switch (key) {
 	case 119:
-	{
 				//forward (w)
 				camera.position += camera.rotation * vec3(0, 0, -moveDist);
 				return true;
-	}
 	case 97:
-	{
 			   //left (a)
 			   camera.position += camera.rotation * vec3(-moveDist, 0, 0);
 			   return true;
-	}
 	case 115:
-	{
 				//backwards (s)
 				camera.position += camera.rotation * vec3(0, 0, moveDist);
 				return true;
-	}
 	case 100:
-	{
 				//right (d)
 				camera.position += camera.rotation * vec3(moveDist, 0, 0);
 				return true;
-	}
 	case 113:
-	{
 				//up (q)
 				camera.position += camera.rotation * vec3(0, moveDist, 0);
 				return true;
-	}
 	case 101:
-	{
 				//down (e)
 				camera.position += camera.rotation * vec3(0, -moveDist, 0);
 				return true;
-	}
 	case 102:
-	{
 				//rotate left (f)
-				vec3 rot(0, rotateDist, 0);
-				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
+				camera.rotation = glm::normalize(camera.rotation * quat(vec3(0, rotateDist, 0)));
 				return true;
-	}
 	case 104:
-	{
 				//rotate right (h)
-				vec3 rot(0, -rotateDist, 0);
-				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
+		camera.rotation = glm::normalize(camera.rotation * quat(vec3(0, -rotateDist, 0)));
 				return true;
-	}
 	case 103:
-	{
 				//rotate down (g)
-				vec3 rot(-rotateDist, 0, 0);
-				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
+		camera.rotation = glm::normalize(camera.rotation * quat(vec3(-rotateDist, 0, 0)));
 				return true;
-	}
 	case 116:
-	{
 				//rotate up (t)
-				vec3 rot(rotateDist, 0, 0);
-				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
+				camera.rotation = glm::normalize(camera.rotation * quat(vec3(rotateDist, 0, 0)));
 				return true;
-	}
-
 	}
 
 	return false;
