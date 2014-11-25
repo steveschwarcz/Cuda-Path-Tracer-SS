@@ -532,6 +532,9 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 		numRays = partitionRay - dev_ray_ptr;
 	}
 
+	std::cout << "Rays per pixel: " << ticks - data->resetTick << "\r";
+	std::cout.flush();
+
 	//write results to buffer
 	writeToPixels <<<grids, threads>>>(pixels, data->rays, ticks - data->resetTick);
 }
