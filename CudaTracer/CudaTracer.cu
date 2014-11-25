@@ -2,6 +2,7 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <stdio.h>
+#include <fstream>
 #include <time.h>
 #include <gl/glew.h>
 #include <gl/GL.h>
@@ -662,13 +663,52 @@ void Key(unsigned char key, int x, int y) {
 		case 32:
 		{
 				   //space bar pressed: switch between path tracer and rudimentary ray tracer
-			   ((ProgramData*)bitmap->dataBlock)->usePathTracer = !((ProgramData*)bitmap->dataBlock)->usePathTracer;
+				   ((ProgramData*)bitmap->dataBlock)->usePathTracer = !((ProgramData*)bitmap->dataBlock)->usePathTracer;
+				   ((ProgramData*)bitmap->dataBlock)->resetTicksThisFrame = true;
+		}
+		case 48:
+		{
+				   //0 key pressed.  save image to file, with filename taken from current time
+				   time_t     now = time(0);
+				   struct tm  tstruct;
+				   char       buf[160];
+				   tstruct = *localtime(&now);
+				   strftime(buf, sizeof(buf), "render%Y-%m-%d-%H%M%S.tga", &tstruct);
+				   saveScreenshot(buf, DIM, DIM);
 		}
 	}
 
-	((ProgramData*)bitmap->dataBlock)->resetTicksThisFrame = true;
+	if (moveCamera(((ProgramData*)bitmap->dataBlock)->camera, key))
+	{
+		((ProgramData*)bitmap->dataBlock)->resetTicksThisFrame = true;
+	}
+}
 
-	moveCamera(((ProgramData*)bitmap->dataBlock)->camera, key);
+
+/// <summary>
+/// Saves a screenshot.  Taken from http://www.flashbang.se/archives/155
+/// </summary>
+/// <param name="filename">The filename.</param>
+/// <param name="x">The x dimensions.</param>
+/// <param name="y">The y dimensions.</param>
+void saveScreenshot(char filename[160], int x, int y)
+{
+	// get the image data
+	long imageSize = x * y * 3;
+	unsigned char *data = new unsigned char[imageSize];
+	glReadPixels(0, 0, x, y, GL_BGR, GL_UNSIGNED_BYTE, data);// split x and y sizes into bytes
+	int xa = x % 256;
+	int xb = (x - xa) / 256; int ya = y % 256;
+	int yb = (y - ya) / 256;//assemble the header
+	unsigned char header[18] = { 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, (char)xa, (char)xb, (char)ya, (char)yb, 24, 0 };
+	// write header and data to file
+	std::fstream File(filename, std::ios::out | std::ios::binary);
+	File.write(reinterpret_cast<char *>(header), sizeof (char)* 18);
+	File.write(reinterpret_cast<char *>(data), sizeof (char)*imageSize);
+	File.close();
+
+	delete[] data;
+	data = NULL;
 }
 
 
@@ -677,7 +717,8 @@ void Key(unsigned char key, int x, int y) {
 /// </summary>
 /// <param name="camera">The camera.</param>
 /// <param name="key">The key that was pressed to move the camera.</param>
-void moveCamera(Camera& camera, unsigned char key)
+/// <returns>True if camera moved, false otherwise</returns>
+bool moveCamera(Camera& camera, unsigned char key)
 {
 	float moveDist = .2f, rotateDist = 10.0*(float)M_PI / 180.0;
 
@@ -686,66 +727,68 @@ void moveCamera(Camera& camera, unsigned char key)
 	{
 				//forward (w)
 				camera.position += camera.rotation * vec3(0, 0, -moveDist);
-				break;
+				return true;
 	}
 	case 97:
 	{
 			   //left (a)
 			   camera.position += camera.rotation * vec3(-moveDist, 0, 0);
-			   break;
+			   return true;
 	}
 	case 115:
 	{
 				//backwards (s)
 				camera.position += camera.rotation * vec3(0, 0, moveDist);
-				break;
+				return true;
 	}
 	case 100:
 	{
 				//right (d)
 				camera.position += camera.rotation * vec3(moveDist, 0, 0);
-				break;
+				return true;
 	}
 	case 113:
 	{
 				//up (q)
 				camera.position += camera.rotation * vec3(0, moveDist, 0);
-				break;
+				return true;
 	}
 	case 101:
 	{
 				//down (e)
 				camera.position += camera.rotation * vec3(0, -moveDist, 0);
-				break;
+				return true;
 	}
 	case 102:
 	{
 				//rotate left (f)
 				vec3 rot(0, rotateDist, 0);
 				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
-				break;
+				return true;
 	}
 	case 104:
 	{
 				//rotate right (h)
 				vec3 rot(0, -rotateDist, 0);
 				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
-				break;
+				return true;
 	}
 	case 103:
 	{
 				//rotate down (g)
 				vec3 rot(-rotateDist, 0, 0);
 				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
-				break;
+				return true;
 	}
 	case 116:
 	{
 				//rotate up (t)
 				vec3 rot(rotateDist, 0, 0);
 				camera.rotation = glm::normalize(camera.rotation * glm::quat(rot));
-				break;
+				return true;
 	}
 
 	}
+
+	return false;
 }

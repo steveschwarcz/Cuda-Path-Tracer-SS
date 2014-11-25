@@ -40,7 +40,8 @@ struct ProgramData
 
 void generateFrame(uchar4 *pixels, void*, int ticks);
 void Key(unsigned char key, int x, int y);
-void moveCamera(Camera& camera, unsigned char key);
+bool moveCamera(Camera& camera, unsigned char key);
+void saveScreenshot(char filename[160], int x, int y);
 
 __device__
 Ray computeEyeRay(int x, int y, int dimX, int dimY, const Camera& camera, curandState& state);
