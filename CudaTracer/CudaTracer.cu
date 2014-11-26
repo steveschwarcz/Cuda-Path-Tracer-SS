@@ -29,7 +29,7 @@ __global__ void curandSetupKernel(curandState *state)
 	curand_init((unsigned int)clock64(), offset, 0, &state[offset]);
 }
 
-__global__ void clearPixels(uchar4 *pixels) {
+__global__ void clearPixels(uchar4 *pixels, uint3 *totalPixelColors) {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x; 
@@ -40,7 +40,13 @@ __global__ void clearPixels(uchar4 *pixels) {
 	newPixel.z = 0;
 	newPixel.w = 0;
 
+	uint3 newPixelTotal;
+	newPixelTotal.x = 0;
+	newPixelTotal.y = 0;
+	newPixelTotal.z = 0;
+
 	pixels[offset] = newPixel;
+	totalPixelColors[offset] = newPixelTotal;
 }
 
 __global__ void computeEyeRaysKernel(Camera camera, Ray* rays, curandState* states) {
@@ -55,38 +61,45 @@ __global__ void computeEyeRaysKernel(Camera camera, Ray* rays, curandState* stat
 	rays[offset] = ray;
 }
 
-__global__ void writeToPixelsKernel(uchar4 *pixels, Ray* rays, int ticks) {
+__global__ void writeToPixelsKernel(uchar4 *pixels, uint3 *totalPixelColors, Ray* rays, int ticks) {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
 
 	Ray ray = rays[offset];
 
-	vec3 radiance = ray.radiance0;
+	int pixelOffset = ray.pixelOffset;
+
+	vec3 radiance = glm::clamp(ray.radiance0, 0.0f, 1.0f);
+
+	//Gamma correction
+	radiance.x = pow(radiance.x, GAMMA_CORRECTION);
+	radiance.y = pow(radiance.y, GAMMA_CORRECTION);
+	radiance.z = pow(radiance.z, GAMMA_CORRECTION);
 
 	uchar3 newPixel;
-	int3 totalPixels;		//the average of the current pixel, multiplied by number of samples (ticks)
+	uint3 totalPixels = totalPixelColors[pixelOffset];		//the average of the current pixel, multiplied by number of samples (ticks)
 
 	//update pixel
-	newPixel.x = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.x, 0.f, 255.f));
-	newPixel.y = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.y, 0.f, 255.f));
-	newPixel.z = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.z, 0.f, 255.f));
+	newPixel.x = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.x + 0.5f, 0.f, 255.f));
+	newPixel.y = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.y + 0.5f, 0.f, 255.f));
+	newPixel.z = static_cast<unsigned int>(glm::clamp<float>(255 * radiance.z + 0.5f, 0.f, 255.f));
 
 	//now average the pixels
-	uchar4 currentPixel = pixels[ray.pixelOffset];
+	uchar4 currentPixel;
 
-	totalPixels.x = currentPixel.x * ticks;
-	totalPixels.y = currentPixel.y * ticks;
-	totalPixels.z = currentPixel.z * ticks;
+	totalPixels.x += newPixel.x;
+	totalPixels.y += newPixel.y;
+	totalPixels.z += newPixel.z;
 
 	float inverseTicks = 1.f / (ticks + 1);
-	currentPixel.x = static_cast<unsigned char>((totalPixels.x + newPixel.x) * inverseTicks + 0.5f);
-	currentPixel.y = static_cast<unsigned char>((totalPixels.y + newPixel.y) * inverseTicks + 0.5f);
-	currentPixel.z = static_cast<unsigned char>((totalPixels.z + newPixel.z) * inverseTicks + 0.5f);
+	currentPixel.x = static_cast<unsigned char>(totalPixels.x * inverseTicks + 0.5f);
+	currentPixel.y = static_cast<unsigned char>(totalPixels.y * inverseTicks + 0.5f);
+	currentPixel.z = static_cast<unsigned char>(totalPixels.z * inverseTicks + 0.5f);
 	currentPixel.w = 255;
 
-
-	pixels[ray.pixelOffset] = currentPixel;
+	totalPixelColors[pixelOffset] = totalPixels;
+	pixels[pixelOffset] = currentPixel;
 
 	return;
 }
@@ -189,16 +202,6 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 __device__
 vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, const Material& material, float cosI, const float distance, const bool inside, curandState& localState)
 {
-
-	//both indexes of refraction, n1 / n2, and sin T squared
-	float n1, n2, n, sinT2;
-
-	//compute values that will be needed later
-	computeSinT2AndRefractiveIndexes(material.indexOfRefraction, cosI, sinT2, n1, n2, n);
-
-	//compute fresnel
-	const float fresnelReflective = computeFresnelForReflectance(cosI, sinT2, n1, n2, n);
-
 	float r = curand_uniform(&localState);
 
 	//--------------------------
@@ -220,6 +223,17 @@ vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, c
 	//--------------------------
 	//		Reflected
 	//--------------------------
+
+
+	//both indexes of refraction, n1 / n2, and sin T squared
+	float n1, n2, n, sinT2;
+
+	//compute values that will be needed later
+	computeSinT2AndRefractiveIndexes(material.indexOfRefraction, cosI, sinT2, n1, n2, n);
+
+	//compute fresnel
+	const float fresnelReflective = computeFresnelForReflectance(cosI, sinT2, n1, n2, n);
+
 	if (material.specAvg > 0.0f)
 	{
 		//glossy reflection
@@ -527,7 +541,7 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	if (data->resetTicksThisFrame) {
 		data->lastResetTick = ticks;
 
-		clearPixels<<<grids, threads>>>(pixels);
+		clearPixels << <grids, threads >> >(pixels, data->totalPixelColors);
 
 		data->resetTicksThisFrame = false;
 	}
@@ -539,16 +553,19 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	
 	//fire n rays per pixel
 	//number of iterations is only one if set to use ray tracing
-	int numIterations = data->usePathTracer ? data->maxIterations : 1;
-	for (unsigned int i = 0; i < numIterations; i++) {
+	unsigned int numIterations = data->usePathTracer ? data->maxIterations : 1;
+	for (unsigned int i = 0; i < numIterations && numRays != 0; i++) {
 		dim3 rayGrids(numRays / 256);
 		pathTraceKernel << < rayGrids, rayThreads >> >(pixels, data->renderData, i);
 
-		//Stream compaction
-		thrust::device_ptr<Ray> dev_ray_ptr(data->renderData.rays);
-		thrust::device_ptr<Ray> partitionRay = thrust::partition(dev_ray_ptr, dev_ray_ptr + numRays, ray_is_active());
+		if (i != numIterations - 1)
+		{
+			//Stream compaction
+			thrust::device_ptr<Ray> dev_ray_ptr(data->renderData.rays);
+			thrust::device_ptr<Ray> partitionRay = thrust::partition(dev_ray_ptr, dev_ray_ptr + numRays, ray_is_active());
 
-		numRays = partitionRay - dev_ray_ptr;
+			numRays = partitionRay - dev_ray_ptr;			
+		}
 	}
 
 	//output number of rays cast thus far
@@ -556,7 +573,7 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	std::cout.flush();
 
 	//write results to buffer
-	writeToPixelsKernel << <grids, threads >> >(pixels, data->renderData.rays, ticks - data->lastResetTick);
+	writeToPixelsKernel << <grids, threads >> >(pixels, data->totalPixelColors, data->renderData.rays, ticks - data->lastResetTick);
 }
 
 int main(int argc, char *argv[])
@@ -574,6 +591,7 @@ int main(int argc, char *argv[])
 	Triangle *triangles;
 	Material *materials;
 	curandState* curandStates;
+	uint3* totalPixelColors;
 
 	//initialize bitmap and data
 	ProgramData *data = new ProgramData();
@@ -601,6 +619,9 @@ int main(int argc, char *argv[])
 	CUDA_ERROR_HANDLE(cudaMalloc(&curandStates, 
 		sizeof(curandState)* DIM *DIM));
 
+	CUDA_ERROR_HANDLE(cudaMalloc((void**)&totalPixelColors,
+		sizeof(uint3)* DIM * DIM));
+
 	//copy data to GPU
 	CUDA_ERROR_HANDLE(cudaMemcpy(spheres, scene.spheresVec.data(), sizeof(Sphere)* scene.spheresVec.size(), cudaMemcpyHostToDevice));
 	CUDA_ERROR_HANDLE(cudaMemcpy(triangles, scene.trianglesVec.data(), sizeof(Triangle)* scene.trianglesVec.size(), cudaMemcpyHostToDevice));
@@ -622,6 +643,7 @@ int main(int argc, char *argv[])
 	data->renderData.materials = materials;
 	data->renderData.defaultColor = defaultColor;
 	data->renderData.curandStates = curandStates;
+	data->totalPixelColors = totalPixelColors;
 
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
@@ -639,6 +661,7 @@ int main(int argc, char *argv[])
 	CUDA_ERROR_HANDLE(cudaFree(rays));
 	CUDA_ERROR_HANDLE(cudaFree(materials));
 	CUDA_ERROR_HANDLE(cudaFree(curandStates));
+	CUDA_ERROR_HANDLE(cudaFree(totalPixelColors));
 	
 	delete data;
 
@@ -724,49 +747,49 @@ void saveScreenshot(char filename[160], int x, int y)
 /// <returns>True if camera moved, false otherwise</returns>
 bool moveCamera(Camera& camera, unsigned char key)
 {
-	float moveDist = .2f, rotateDist = 10.0*(float)M_PI / 180.0;
+	float moveDist = .2f, rotateDist = 10.0f * M_PI / 180.0f;
 
 	switch (key) {
 	case 119:
-				//forward (w)
-				camera.position += camera.rotation * vec3(0, 0, -moveDist);
-				return true;
+		//forward (w)
+		camera.position += camera.rotation * vec3(0, 0, -moveDist);
+		return true;
 	case 97:
-			   //left (a)
-			   camera.position += camera.rotation * vec3(-moveDist, 0, 0);
-			   return true;
+		//left (a)
+		camera.position += camera.rotation * vec3(-moveDist, 0, 0);
+		return true;
 	case 115:
-				//backwards (s)
-				camera.position += camera.rotation * vec3(0, 0, moveDist);
-				return true;
+		//backwards (s)
+		camera.position += camera.rotation * vec3(0, 0, moveDist);
+		return true;
 	case 100:
-				//right (d)
-				camera.position += camera.rotation * vec3(moveDist, 0, 0);
-				return true;
+		//right (d)
+		camera.position += camera.rotation * vec3(moveDist, 0, 0);
+		return true;
 	case 113:
-				//up (q)
-				camera.position += camera.rotation * vec3(0, moveDist, 0);
-				return true;
+		//up (q)
+		camera.position += camera.rotation * vec3(0, moveDist, 0);
+		return true;
 	case 101:
-				//down (e)
-				camera.position += camera.rotation * vec3(0, -moveDist, 0);
-				return true;
+		//down (e)
+		camera.position += camera.rotation * vec3(0, -moveDist, 0);
+		return true;
 	case 102:
-				//rotate left (f)
-				camera.rotation = glm::normalize(camera.rotation * quat(vec3(0, rotateDist, 0)));
-				return true;
+		//rotate left (f)
+		camera.rotation = glm::normalize(camera.rotation * quat(vec3(0, rotateDist, 0)));
+		return true;
 	case 104:
-				//rotate right (h)
+		//rotate right (h)
 		camera.rotation = glm::normalize(camera.rotation * quat(vec3(0, -rotateDist, 0)));
-				return true;
+		return true;
 	case 103:
-				//rotate down (g)
+		//rotate down (g)
 		camera.rotation = glm::normalize(camera.rotation * quat(vec3(-rotateDist, 0, 0)));
-				return true;
+		return true;
 	case 116:
-				//rotate up (t)
-				camera.rotation = glm::normalize(camera.rotation * quat(vec3(rotateDist, 0, 0)));
-				return true;
+		//rotate up (t)
+		camera.rotation = glm::normalize(camera.rotation * quat(vec3(rotateDist, 0, 0)));
+		return true;
 	}
 
 	return false;

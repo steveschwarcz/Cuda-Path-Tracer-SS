@@ -22,8 +22,8 @@ void Scene::build() {
 	//scene.pointLightsVec.push_back(PointLight(vec3(2, 9.0f, -5), vec3(power, power, power)));
 
 	//add Spheres
-	//addRandomSpheres(15);
-	addDefinedSpheres(4);
+	addRandomSpheres(15);
+//	addDefinedSpheres(4);
 
 	//add cornell box
 	addCornellBox(8);
@@ -99,7 +99,7 @@ void Scene::addRectangularModel(mat4 transformation, int materialIdx)
 void Scene::addDefinedSpheres(const float size) {
 	int matIdx = materialsVec.size();
 
-	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.35f, vec3(1, 1, 1), 250, 0.6f, 1.75f));
+	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.35f, vec3(1, 1, 1), 250, 0.6f, 2.5f));
 //	materialsVec[matIdx].pureRefl = true;
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
 		vec3(1, 1, 1), 300, 0.9f, 1.55f,
@@ -118,23 +118,25 @@ void Scene::addRandomSpheres(const size_t numSpheres)
 	int matIdx = materialsVec.size();
 
 	//add matrials
-	materialsVec.push_back(Material(vec3(0.0f, 0.0f, 1.0f), 0.9f));
-	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
 		vec3(1, 1, 1), INFINITY, 0.9f, 1.55f,
-		vec3(1, 1, 1), .9f));
-	/*scene.materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
-	vec3(1, 1, 1), INFINITY, 0.9f, 1.6f));
-	scene.materialsVec[matIdx + 3].pureRefl = true;*/
+		vec3(0.25f, 0.25f, 0), .9f));
+	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 1.0f), 0.9f));
+	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.35f, vec3(1, 1, 1), 250, 0.6f, 2.5f));
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.2f,
+	vec3(1, 1, 1), INFINITY, 0.7f, 4.0f));
+//	materialsVec[matIdx + 3].pureRefl = true;
 
 
 	for (size_t i = 0; i < numSpheres; i++)
 	{
 		Sphere s;
 
+		rnd(1); rnd(1);
+
 		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(5.0f) - 8.0f);
 		s.radius = rnd(0.5f) + 0.5f;
-		s.materialIdx = matIdx + (i % 3);
+		s.materialIdx = matIdx;// +(i % 4);
 
 		spheresVec.push_back(s);
 	}
@@ -196,8 +198,8 @@ void Scene::addCornellBox(const float wallSize)
 	addRectangularModel(trans, matIdx);
 
 	//light
-	float power = 1200;
-	trans = translate(vec3(0, offset - 0.001f, -offset)) *
+	float power = 400;
+	trans = translate(vec3(0, offset - 0.01f, -offset)) *
 		rotate((glm::mediump_float) 90, vec3(1, 0, 0)) *
 		scale(vec3(2.5f, 2.5f, 2.5f));
 	addAreaLight(trans, matIdx + 3, vec3(power, power, power));

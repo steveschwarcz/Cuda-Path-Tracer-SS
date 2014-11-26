@@ -4,6 +4,7 @@
 #define INVERSE_PI 0.31830988618f
 
 #define RAY_BUMP_EPSILON 1e-4f
+#define GAMMA_CORRECTION (1/2.2f)
 
 
 /// <summary>
@@ -30,12 +31,13 @@ struct RendererData
 /// </summary>
 struct ProgramData
 {
-	RendererData renderData;
-	Camera camera;
-	int lastResetTick;
-	unsigned int maxIterations = 10;
-	bool resetTicksThisFrame;
-	bool usePathTracer = true;
+	RendererData renderData;			//all necessary data for main render loop
+	Camera camera;						//The camera
+	uint3 *totalPixelColors;			//A running total of the color in all pixels.  Used to average the results of ray tracing  
+	int lastResetTick;					//The last tick since the tracing was "reset"
+	unsigned int maxIterations = 10;	//The maximum number of bounces a ray can perform
+	bool resetTicksThisFrame;			//If true, the tracing must be reset this frame
+	bool usePathTracer = true;			//If true, then the path tracing algorithm is running.  If false, simple ray tracing is used instead
 };
 
 void generateFrame(uchar4 *pixels, void*, int ticks);
