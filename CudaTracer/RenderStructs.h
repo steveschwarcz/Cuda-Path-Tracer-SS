@@ -74,6 +74,8 @@ struct AreaLight
 		triangleIdx(triangleIdx), numTriangles(numTriangles), area(area), power(power) {}
 };
 
+#define MAT_FLAG_PURE_REFLECTION 0x01		//if true, do not use fresnel when calculating relfection
+#define MAT_FLAG_COOK_TORRANCE 0x03			//if true, use the Cook-torrence shading model
 
 struct Material
 {
@@ -86,7 +88,8 @@ struct Material
 	float diffAvg;
 	float specAvg;
 	float refrAvg;
-	bool pureRefl = false;
+	float roughness;
+	char flags = 0;
 
 
 	Material() {};
@@ -95,7 +98,7 @@ struct Material
 	Material(vec3 diffuseColor, float diffAvg, vec3 specularColor = vec3(0, 0, 0), float specularExponent = 0, float specAvg = 0, 
 		float indexOfRefraction = 1.0f, vec3 absorption = vec3(0, 0, 0), float refrAvg = 0, vec3 emmitance = vec3(0, 0, 0)) :
 			diffuseColor(diffuseColor), diffAvg(diffAvg), specularColor(specularColor), specularExponent(specularExponent), specAvg(specAvg), 
-			absorption(absorption), indexOfRefraction(indexOfRefraction), refrAvg(refrAvg), emmitance(emmitance), pureRefl(false) {};
+			absorption(absorption), indexOfRefraction(indexOfRefraction), refrAvg(refrAvg), emmitance(emmitance), flags(0) {};
 
 	explicit Material(vec3 emmitance) :
 		diffuseColor(vec3(0, 0, 0)), diffAvg(0), specularColor(vec3(0, 0, 0)), specularExponent(0), specAvg(0),

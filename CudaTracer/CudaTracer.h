@@ -35,7 +35,7 @@ struct ProgramData
 	Camera camera;						//The camera
 	uint3 *totalPixelColors;			//A running total of the color in all pixels.  Used to average the results of ray tracing  
 	int lastResetTick;					//The last tick since the tracing was "reset"
-	unsigned int maxIterations = 10;	//The maximum number of bounces a ray can perform
+	unsigned int maxIterations = 5;		//The maximum number of bounces a ray can perform
 	bool resetTicksThisFrame;			//If true, the tracing must be reset this frame
 	bool usePathTracer = true;			//If true, then the path tracing algorithm is running.  If false, simple ray tracing is used instead
 };
@@ -67,16 +67,22 @@ __device__
 void computeSinT2AndRefractiveIndexes(const float refrIndex, float& cosI, float& sinT2, float& n1, float& n2, float& n);
 
 __device__
+void reflRay(Ray& ray, const vec3& point, const vec3& normal);
+
+__device__
 void reflRay(Ray& ray, const SurfaceElement& surfel, const float cosI);
 
 __device__
 void refrRay(Ray& ray, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n);
 
 __device__
-const vec3 cosHemiRandom(vec3 const& normal, curandState& state);
+vec3 randomDirectionLambert(vec3 const& normal, curandState& state);
 
 __device__
-const vec3 cosHemiRandomPhong(const vec3& w_o, float exponent, curandState& state);
+vec3 randomDirectionPhong(const vec3& w_o, float exponent, curandState& state);
+
+__device__
+vec3 randomDirectionBeckmann(vec3 const& normal, float roughness, curandState& state);
 
 __device__
 const quat rotateVectorToVector(const vec3& source, const vec3& target);

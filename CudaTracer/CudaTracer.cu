@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <fstream>
 #include <time.h>
+#include <cmath>
 #include <gl/glew.h>
 #include <gl/GL.h>
 #include <gl/freeglut.h>
@@ -188,6 +189,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 	else
 	{
 		//ray completely missed
+		ray.radiance0 += data.defaultColor * ray.radiance1;
 		ray.active = false;
 	}
 
@@ -214,7 +216,7 @@ vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, c
 		if (r < 0.0f)
 		{
 			ray.origin = surfel.point + RAY_BUMP_EPSILON * surfel.normal;
-			ray.direction = cosHemiRandom(surfel.normal, localState);
+			ray.direction = randomDirectionLambert(surfel.normal, localState);
 
 			return material.diffuseColor;
 		}
@@ -237,7 +239,7 @@ vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, c
 	if (material.specAvg > 0.0f)
 	{
 		//glossy reflection
-		if (material.pureRefl) {
+		if (material.flags & MAT_FLAG_PURE_REFLECTION) {
 			//pure reflectance: do not compute fresnel
 			r -= material.specAvg;
 		}
@@ -248,13 +250,39 @@ vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, c
 
 		if (r < 0.0f)
 		{
+			//check for cook torrance
+			if (material.flags & MAT_FLAG_COOK_TORRANCE)
+			{
+				//get a new importance-sampled normal according to the Beckmann ditribution
+				vec3 beckmannNormal = randomDirectionBeckmann(surfel.normal, material.roughness, localState);
+
+				//store the old incident direction
+				vec3 incident = ray.direction;
+
+				//reflect the ray according to the new normal
+				reflRay(ray, surfel.point, beckmannNormal);
+
+
+				//calculate the geometric term of Cook-Torrance, to account for shadowing and masking
+				vec3 half = normalize(ray.direction - incident);
+
+				float nh = abs(dot(surfel.normal, half));
+				float nl = abs(dot(surfel.normal, ray.direction));
+				float vh = abs(dot(incident, half));
+				float nv = abs(cosI);
+
+				float geometric = glm::min<float>(glm::min<float>(1, 2 * nh * nl / vh), 2 * nh * nv / vh);
+
+				return material.specularColor * geometric;
+			}
+
 			reflRay(ray, surfel, cosI);
 
 			//TODO: Reference paper
 			//glossy scattering
 			if (material.specularExponent != INFINITY) {
 				//use an importance sampled ray to determine which way the ray ought to travel
-				ray.direction = cosHemiRandomPhong(ray.direction, material.specularExponent, localState);
+				ray.direction = randomDirectionPhong(ray.direction, material.specularExponent, localState);
 			}
 			//mirror reflectance otherwise.  Nothing to do
 
@@ -367,9 +395,15 @@ vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Materia
 __device__
 vec3 getAreaLightPoint(const AreaLight& light, Triangle* triangles, curandState& state) {
 	//get a random point on a triangle
+//	float u1 = curand_uniform(&state);
+//	float u2 = curand_uniform(&state) * u1;
+//	float weight0 = u1 - u2, weight1 = u2, weight2 = 1 - u1;
+
 	float u1 = curand_uniform(&state);
-	float u2 = curand_uniform(&state) * u1;
-	float weight0 = u1 - u2, weight1 = u2, weight2 = 1 - u1;
+	float u2 = curand_uniform(&state);
+	float u3 = curand_uniform(&state);
+	float inverseTotal = 1 / (u1 + u2 + u3);
+	float weight0 = u1 * inverseTotal, weight1 = u2 * inverseTotal, weight2 = u3 * inverseTotal;
 	
 	//FIXME: This only works because the light is known to be rectangular - This needs to be expanded for more complex lights
 	//get a random point on the light's triangles
@@ -475,6 +509,17 @@ void reflRay(Ray& ray, const SurfaceElement& surfel, const float cosI)
 }
 
 __device__
+void reflRay(Ray& ray, const vec3& point, const vec3& normal)
+{
+	float cosI = abs(dot(ray.direction, normal));
+
+	vec3 w_o = ray.direction - 2 * (-cosI) * normal;
+
+	ray.origin = point + (normal * RAY_BUMP_EPSILON);
+	ray.direction = w_o;
+}
+
+__device__
 void refrRay(Ray& ray, const SurfaceElement& surfel, const float cosI, const float sinT2, const float n)
 {
 	//check for TIR
@@ -492,7 +537,7 @@ void refrRay(Ray& ray, const SurfaceElement& surfel, const float cosI, const flo
 }
 
 __device__
-const vec3 cosHemiRandom(vec3 const& normal, curandState& state)
+vec3 randomDirectionLambert(vec3 const& normal, curandState& state)
 {
 	float theta = curand_uniform(&state) * 2 * M_PI;
 	float s = curand_uniform(&state);
@@ -506,7 +551,7 @@ const vec3 cosHemiRandom(vec3 const& normal, curandState& state)
 }
 
 __device__
-const vec3 cosHemiRandomPhong(const vec3& w_o, float exponent, curandState& state)
+vec3 randomDirectionPhong(const vec3& w_o, float exponent, curandState& state)
 {
 	float theta = curand_uniform(&state) * 2 * M_PI;
 	float s = curand_uniform(&state);
@@ -517,6 +562,23 @@ const vec3 cosHemiRandomPhong(const vec3& w_o, float exponent, curandState& stat
 	quat rot = rotateVectorToVector(vec3(0, 1, 0), w_o);
 
 	return rot * sample;
+}
+
+vec3 randomDirectionBeckmann(vec3 const& normal, float roughness, curandState& state)
+{
+	float theta = atan(-roughness * roughness * log(1.0f - curand_uniform(&state)));
+	float phi = curand_uniform(&state) * 2 * M_PI;
+
+	float cosPhi = cosf(phi);
+	float sinPhi = sinf(phi);
+	float cosTheta = cosf(theta);
+	float sinTheta = sinf(theta);
+	//convert to cartesian coordinants from spherical
+	vec3 m = vec3(sinTheta * cosPhi, cosTheta, sinTheta * sinPhi);
+
+	quat rot = rotateVectorToVector(vec3(0, 1, 0), normal);
+
+	return rot * m;
 }
 
 __device__

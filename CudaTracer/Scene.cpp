@@ -22,7 +22,7 @@ void Scene::build() {
 	//scene.pointLightsVec.push_back(PointLight(vec3(2, 9.0f, -5), vec3(power, power, power)));
 
 	//add Spheres
-	addRandomSpheres(15);
+	addRandomSpheres(20);
 //	addDefinedSpheres(4);
 
 	//add cornell box
@@ -122,12 +122,15 @@ void Scene::addRandomSpheres(const size_t numSpheres)
 		vec3(1, 1, 1), INFINITY, 0.9f, 1.55f,
 		vec3(0.25f, 0.25f, 0), .9f));
 	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 1.0f), 0.9f));
-	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.35f, vec3(1, 1, 1), 250, 0.6f, 2.5f));
+	materialsVec.push_back(Material(vec3(0.4f, 0.1f, 1.0f), 0.2f, vec3(0.2f, 0.2f, 1.f), INFINITY, 0.7f, 2.7f));
+	materialsVec[matIdx + 2].flags |= MAT_FLAG_COOK_TORRANCE;
+	materialsVec[matIdx + 2].roughness = 0.7f;
+
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.2f,
 	vec3(1, 1, 1), INFINITY, 0.7f, 4.0f));
 //	materialsVec[matIdx + 3].pureRefl = true;
 
-
+	
 	for (size_t i = 0; i < numSpheres; i++)
 	{
 		Sphere s;
@@ -136,7 +139,7 @@ void Scene::addRandomSpheres(const size_t numSpheres)
 
 		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(5.0f) - 8.0f);
 		s.radius = rnd(0.5f) + 0.5f;
-		s.materialIdx = matIdx;// +(i % 4);
+		s.materialIdx = matIdx + (i % 4);
 
 		spheresVec.push_back(s);
 	}
@@ -154,11 +157,11 @@ void Scene::addCornellBox(const float wallSize)
 
 	int matIdx = materialsVec.size();
 
-	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 0.8f), 0.9f));	//white			(+0)
-	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.9f));	//red			(+1)
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 0.8f), 0.7f));	//white			(+0)
+	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.7f));	//red			(+1)
 	//materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.1f, vec3(1, 1, 1), INFINITY, .9f, 1.5f));	//green			(+2)
 	//materialsVec[matIdx + 2].pureRefl = true;
-	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.9f));	//green			(+2)
+	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.7f));	//green			(+2)
 
 
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f)));			//white light	(+3)

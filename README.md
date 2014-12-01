@@ -12,7 +12,7 @@ It currently features:
 
 * Iterative Path tracing with next-event estimation
 * Stream compation for rays
-* Importance sampled Lambert and Phong shaders
+* Importance sampled Lambert, Phong, and Cook-Torrance shaders
 * Antialiasing through jittering
 * Area and point lights
 * Reflection, refraction with absorbance
