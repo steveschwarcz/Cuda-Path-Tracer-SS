@@ -273,7 +273,8 @@ vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, c
 
 				float geometric = glm::min<float>(glm::min<float>(1, 2 * nh * nl / vh), 2 * nh * nv / vh);
 
-				return material.specularColor * geometric;
+				//note that the nl term in the denominator cancels out
+				return material.specularColor * geometric / nv;
 			}
 
 			reflRay(ray, surfel, cosI);
