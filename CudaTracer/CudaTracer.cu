@@ -105,22 +105,20 @@ __global__ void writeToPixelsKernel(uchar4 *pixels, uint3 *totalPixelColors, Ray
 	return;
 }
 
-__global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iterations)
+__global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iterations, bool isLastIteration)
 {
 	int offset = threadIdx.x + blockIdx.x * blockDim.x;
 
 	//get curand state
 	curandState localState = data.curandStates[offset];
 
-	Ray ray(true);
-
 	//use the existing ray
-	ray = data.rays[offset];
+	Ray ray = data.rays[offset];
 
-	//before continuing, be sure that the ray is active
-	if (!ray.active) {
-		return;
-	}
+//	//before continuing, be sure that the ray is active
+//	if (!ray.active) {
+//		return;
+//	}
 
 	float distance = INFINITY;
 	SurfaceElement surfel;
@@ -130,7 +128,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 	//loop through spheres, finding intersection
 	for (size_t i = 0; i < data.numSpheres; i++)
 	{
-		Sphere sphere = data.spheres[i];
+		Sphere &sphere = data.spheres[i];
 
 		if (sphere.intersectRay(ray, distance, surfel))
 		{
@@ -140,7 +138,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 
 	for (size_t i = 0; i < data.numTriangles; i++)
 	{
-		Triangle triangle = data.triangles[i];
+		Triangle &triangle = data.triangles[i];
 
 		if (triangle.intersectRay(ray, distance, surfel))
 		{
@@ -180,7 +178,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 		//--------------------------
 		//		Scattering
 		//--------------------------
-		vec3 indirectRadiance = computeIndirectRadianceAndScatter(ray, surfel, material, cosI, distance, inside, localState);
+		vec3 indirectRadiance = isLastIteration ? vec3(1, 1, 1) : computeIndirectRadianceAndScatter(ray, surfel, material, cosI, distance, inside, localState);
 
 		//save radiance
 		ray.radiance0 += ray.radiance1 * directRadiance;
@@ -357,7 +355,7 @@ vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Materia
 	//loop through all point lights
 	for (size_t i = 0; i < data.numPointLights; i++)
 	{
-		PointLight light = data.pointLights[i];
+		PointLight &light = data.pointLights[i];
 
 		if (lineOfSight(data, surfel.normal, surfel.point, light.position, w_i, distance2))
 		{
@@ -374,7 +372,7 @@ vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Materia
 	//loop through all area lights
 	for (size_t i = 0; i < data.numAreaLights; i++)
 	{
-		AreaLight light = data.areaLights[i];
+		AreaLight &light = data.areaLights[i];
 
 		vec3 point = getAreaLightPoint(light, data.triangles, state);
 
@@ -400,6 +398,7 @@ vec3 getAreaLightPoint(const AreaLight& light, Triangle* triangles, curandState&
 //	float u2 = curand_uniform(&state) * u1;
 //	float weight0 = u1 - u2, weight1 = u2, weight2 = 1 - u1;
 
+	//this produced better results, and in practice cost very little extra computation
 	float u1 = curand_uniform(&state);
 	float u2 = curand_uniform(&state);
 	float u3 = curand_uniform(&state);
@@ -440,7 +439,7 @@ bool lineOfSight(const RendererData& data, const vec3& normal, const vec3& point
 	//TODO: More robust implementation
 	for (size_t i = 0; i < data.numSpheres; i++)
 	{
-		Sphere sphere = data.spheres[i];
+		Sphere &sphere = data.spheres[i];
 
 		if (sphere.intersectRay(losRay, distance, surfel))
 		{
@@ -450,7 +449,7 @@ bool lineOfSight(const RendererData& data, const vec3& normal, const vec3& point
 
 	for (size_t i = 0; i < data.numTriangles; i++)
 	{
-		Triangle triangle = data.triangles[i];
+		Triangle &triangle = data.triangles[i];
 
 		if (triangle.intersectRay(losRay, distance, surfel))
 		{
@@ -596,9 +595,13 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 
 	//TODO: Implement a way to reset ticks when moving
 
-	dim3 rayThreads(256);
-	dim3 grids(DIM / 16, DIM / 16);
-	dim3 threads(16, 16);
+	//values found through trial and error - may not be ideal numbers for other systems
+	static const int numThreadsForRays = 96;
+	static const int numThreadsFor2D = 16;
+
+	dim3 rayThreads(numThreadsForRays);
+	dim3 grids(DIM / numThreadsFor2D, DIM / numThreadsFor2D);
+	dim3 threads(numThreadsFor2D, numThreadsFor2D);
 
 	//if necessary, clear the pixels and reset the number of ticks
 	if (data->resetTicksThisFrame) {
@@ -609,6 +612,9 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 		data->resetTicksThisFrame = false;
 	}
 
+
+	cudaEventRecord(data->start);
+
 	//create the rays
 	computeEyeRaysKernel << <grids, threads >> > (data->camera, data->renderData.rays, data->renderData.curandStates);
 
@@ -618,8 +624,8 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	//number of iterations is only one if set to use ray tracing
 	unsigned int numIterations = data->usePathTracer ? data->maxIterations : 1;
 	for (unsigned int i = 0; i < numIterations && numRays != 0; i++) {
-		dim3 rayGrids(numRays / 256);
-		pathTraceKernel << < rayGrids, rayThreads >> >(pixels, data->renderData, i);
+		dim3 rayGrids(numRays / numThreadsForRays);
+		pathTraceKernel << < rayGrids, rayThreads >> >(pixels, data->renderData, i, i == numIterations - 1);
 
 		if (i != numIterations - 1)
 		{
@@ -631,12 +637,18 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 		}
 	}
 
-	//output number of rays cast thus far
-	std::cout << "Rays per pixel: " << ticks - data->lastResetTick << "     \r";
-	std::cout.flush();
-
 	//write results to buffer
+	//TODO: Try putting this in the path trace kernel, built into the last kernel call
 	writeToPixelsKernel << <grids, threads >> >(pixels, data->totalPixelColors, data->renderData.rays, ticks - data->lastResetTick);
+
+	cudaEventRecord(data->stop);
+	cudaEventSynchronize(data->stop);
+	float milliseconds = 0;
+	cudaEventElapsedTime(&milliseconds, data->start, data->stop);
+
+	//output number of rays cast thus far
+	std::cout << "Rays per pixel: " << ticks - data->lastResetTick << "  Time per pass: " << milliseconds <<"     \r";
+	std::cout.flush();
 }
 
 int main(int argc, char *argv[])
@@ -707,6 +719,9 @@ int main(int argc, char *argv[])
 	data->renderData.defaultColor = defaultColor;
 	data->renderData.curandStates = curandStates;
 	data->totalPixelColors = totalPixelColors;
+
+	cudaEventCreate(&data->start);
+	cudaEventCreate(&data->stop);
 
 	dim3 grids(DIM / 16, DIM / 16);
 	dim3 threads(16, 16);
@@ -801,7 +816,7 @@ void saveScreenshot(char filename[160], int x, int y)
 	data = NULL;
 }
 
-
+//TODO: Refactor camera so that rotation is stored as euler angles instead of as a quaternion
 /// <summary>
 /// Moves the camera.
 /// </summary>

@@ -34,6 +34,7 @@ struct ProgramData
 	RendererData renderData;			//all necessary data for main render loop
 	Camera camera;						//The camera
 	uint3 *totalPixelColors;			//A running total of the color in all pixels.  Used to average the results of ray tracing  
+	cudaEvent_t start, stop;			//For measuring timing
 	int lastResetTick;					//The last tick since the tracing was "reset"
 	unsigned int maxIterations = 5;		//The maximum number of bounces a ray can perform
 	bool resetTicksThisFrame;			//If true, the tracing must be reset this frame

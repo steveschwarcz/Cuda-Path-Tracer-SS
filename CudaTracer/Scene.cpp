@@ -22,7 +22,7 @@ void Scene::build() {
 	//scene.pointLightsVec.push_back(PointLight(vec3(2, 9.0f, -5), vec3(power, power, power)));
 
 	//add Spheres
-	addRandomSpheres(20);
+	addRandomSpheres(6);
 //	addDefinedSpheres(4);
 
 	//add cornell box
@@ -118,17 +118,29 @@ void Scene::addRandomSpheres(const size_t numSpheres)
 	int matIdx = materialsVec.size();
 
 	//add matrials
+
+	//slightly blue glass
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
 		vec3(1, 1, 1), INFINITY, 0.9f, 1.55f,
 		vec3(0.25f, 0.25f, 0), .9f));
+
+	//diffuse teal
 	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 1.0f), 0.9f));
+
+	//blue cook torrance
 	materialsVec.push_back(Material(vec3(0.4f, 0.1f, 1.0f), 0.2f, vec3(0.2f, 0.2f, 1.f), INFINITY, 0.7f, 2.7f));
 	materialsVec[matIdx + 2].flags |= MAT_FLAG_COOK_TORRANCE;
 	materialsVec[matIdx + 2].roughness = 0.7f;
 
+	//reflective
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.2f,
 	vec3(1, 1, 1), INFINITY, 0.7f, 4.0f));
 //	materialsVec[matIdx + 3].pureRefl = true;
+
+	//red cook torrance
+	materialsVec.push_back(Material(vec3(1.0f, 0.1f, 0.1f), 0.2f, vec3(1.0f, 0.2f, 0.2f), INFINITY, 0.7f, 2.7f));
+	materialsVec[matIdx + 4].flags |= MAT_FLAG_COOK_TORRANCE;
+	materialsVec[matIdx + 4].roughness = 0.7f;
 
 	
 	for (size_t i = 0; i < numSpheres; i++)
@@ -139,7 +151,7 @@ void Scene::addRandomSpheres(const size_t numSpheres)
 
 		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(5.0f) - 8.0f);
 		s.radius = rnd(0.5f) + 0.5f;
-		s.materialIdx = matIdx + (i % 4);
+		s.materialIdx = matIdx + (i % 5);
 
 		spheresVec.push_back(s);
 	}

@@ -25,28 +25,37 @@ public:
 	__device__
 	bool intersectRay(const Ray& ray, float& distance, SurfaceElement& surfel) const
 	{
+		//intersect ray with triangle using the Möller–Trumbore intersection algorithm
+
+		//epsilon to check bounds of a if a is close to 0
+		const float epsilon = 1e-7f;
+		const float epsilon2 = 1e-10f;
+
 		float weight[3];
 
 		const vec3 e1 = vertex1 - vertex0;
 		const vec3 e2 = vertex2 - vertex0;
 		const vec3 q = cross(ray.direction, e2);
 
-		const float a = dot(e1,q);
+		const float det = dot(e1,q);
+
+		if (fabs(det) <= epsilon) {
+			return false;
+		}
+
+		const float inverseDet = 1 / det;
 
 		const vec3 s = ray.origin - vertex0;
 		const vec3 r = cross(s, e1);
 
-		weight[1] = dot(s, q) / a;
-		weight[2] = dot(ray.direction, r) / a;
+		//calculate barycentric weights
+		weight[1] = dot(s, q) * inverseDet;
+		weight[2] = dot(ray.direction, r) * inverseDet;
 		weight[0] = 1.0f - (weight[1] + weight[2]);
 
-		const float dist = dot(e2, r) / a;
+		const float dist = dot(e2, r) * inverseDet;
 
-		//epsilon to check bounds of a if a is close to 0
-		const float epsilon = 1e-7f;
-		const float epsilon2 = 1e-10f;
-
-		if ((fabs(a) <= epsilon) || (weight[0] < -epsilon2) || (weight[1] < -epsilon2)
+		if ((weight[0] < -epsilon2) || (weight[1] < -epsilon2)
 			|| (weight[2] < -epsilon2) || (dist <= 0.0f) || (dist > distance))
 		{
 			//ray is parellel to triangle, or behind triangle, or misses triangle
