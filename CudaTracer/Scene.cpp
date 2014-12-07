@@ -80,10 +80,7 @@ void Scene::addRectangularModel(mat4 transformation, int materialIdx)
 	//get the inverse-transpose of the transformation matrix, to properly transform the normals
 	newNormal = glm::inverse(glm::transpose(transformation)) * newNormal;
 
-	//normalize the new normal
-	newNormal = normalize(newNormal);
-
-	vec3 vertexes[4], normal = vec3(newNormal);
+	vec3 vertexes[4], normal = normalize(vec3(newNormal));
 
 	//add normals and vertexes
 	for (int i = 0; i < 4; i++)
@@ -121,24 +118,24 @@ void Scene::addRandomSpheres(const size_t numSpheres)
 
 	//slightly blue glass
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
-		vec3(1, 1, 1), INFINITY, 0.9f, 1.55f,
-		vec3(0.25f, 0.25f, 0), .9f));
+		vec3(1, 1, 1), INFINITY, 0.7f, 1.55f,
+		vec3(0.25f, 0.25f, 0), .7f));
 
 	//diffuse teal
-	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 1.0f), 0.9f));
+	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 1.0f), 0.7f));
 
 	//blue cook torrance
-	materialsVec.push_back(Material(vec3(0.4f, 0.1f, 1.0f), 0.2f, vec3(0.2f, 0.2f, 1.f), INFINITY, 0.7f, 2.7f));
+	materialsVec.push_back(Material(vec3(0.4f, 0.1f, 1.0f), 0.1f, vec3(0.2f, 0.2f, 1.f), INFINITY, 0.6f, 2.7f));
 	materialsVec[matIdx + 2].flags |= MAT_FLAG_COOK_TORRANCE;
 	materialsVec[matIdx + 2].roughness = 0.7f;
 
 	//reflective
-	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.2f,
-	vec3(1, 1, 1), INFINITY, 0.7f, 4.0f));
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.1f,
+	vec3(1, 1, 1), INFINITY, 0.6f, 4.0f));
 //	materialsVec[matIdx + 3].pureRefl = true;
 
 	//red cook torrance
-	materialsVec.push_back(Material(vec3(1.0f, 0.1f, 0.1f), 0.2f, vec3(1.0f, 0.2f, 0.2f), INFINITY, 0.7f, 2.7f));
+	materialsVec.push_back(Material(vec3(1.0f, 0.1f, 0.1f), 0.1f, vec3(1.0f, 0.2f, 0.2f), INFINITY, 0.6f, 2.7f));
 	materialsVec[matIdx + 4].flags |= MAT_FLAG_COOK_TORRANCE;
 	materialsVec[matIdx + 4].roughness = 0.7f;
 
@@ -176,7 +173,7 @@ void Scene::addCornellBox(const float wallSize)
 	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.7f));	//green			(+2)
 
 
-	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f)));			//white light	(+3)
+	materialsVec.push_back(Material(vec3(10000.0f, 10000.0f, 10000.0f)));			//white light	(+3)
 
 	const float offset = wallSize / 2;
 

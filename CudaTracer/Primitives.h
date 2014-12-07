@@ -23,13 +23,12 @@ public:
 		vertex0(vertex0), vertex1(vertex1), vertex2(vertex2), normal0(normal0), normal1(normal1), normal2(normal2), materialIdx(materialIdx) {};
 
 	__device__
-	bool intersectRay(const Ray& ray, float& distance, SurfaceElement& surfel) const
+	bool intersectRay(const Ray& ray, float& distance, SurfaceElement& surfel, bool updateSurfel = true) const
 	{
 		//intersect ray with triangle using the Möller–Trumbore intersection algorithm
 
 		//epsilon to check bounds of a if a is close to 0
 		const float epsilon = 1e-7f;
-		const float epsilon2 = 1e-10f;
 
 		float weight[3];
 
@@ -48,29 +47,38 @@ public:
 		const vec3 s = ray.origin - vertex0;
 		const vec3 r = cross(s, e1);
 
+		const float dist = dot(e2, r) * inverseDet;
+
+		if ((dist <= 0.0f) || (dist > distance))
+		{
+			return false;
+		}
+
 		//calculate barycentric weights
 		weight[1] = dot(s, q) * inverseDet;
 		weight[2] = dot(ray.direction, r) * inverseDet;
 		weight[0] = 1.0f - (weight[1] + weight[2]);
 
-		const float dist = dot(e2, r) * inverseDet;
-
-		if ((weight[0] < -epsilon2) || (weight[1] < -epsilon2)
-			|| (weight[2] < -epsilon2) || (dist <= 0.0f) || (dist > distance))
+		if ((weight[0] < 0) || (weight[1] < 0)
+			|| (weight[2] < 0))
 		{
 			//ray is parellel to triangle, or behind triangle, or misses triangle
 			return false;
 		}
 
-		vec3 normalResult = normalize(vec3(normal0 * weight[0] +
-			normal1 * weight[1] +
-			normal2 * weight[2]));
+		if (updateSurfel)
+		{
+			vec3 normalResult = normal0 * weight[0] +
+				normal1 * weight[1] +
+				normal2 * weight[2];
 
-		vec3 intersectionPoint = ray.origin + ray.direction * dist;
+			vec3 intersectionPoint = ray.origin + ray.direction * dist;
 
-		surfel = SurfaceElement(intersectionPoint, normalResult, materialIdx);
+			surfel = SurfaceElement(intersectionPoint, normalResult, materialIdx);
+		}
 
 		distance = dist;
+
 		return true;
 	}
 };
@@ -97,12 +105,12 @@ public:
 	}
 
 	__device__
-	bool intersectRay(const Ray& ray, float& distance, SurfaceElement& surfel) const
+	bool intersectRay(const Ray& ray, float& distance, SurfaceElement& surfel, bool updateSurfel = true) const
 	{
 		vec3 v = ray.origin - position;
 
 		//a = 1, since all direction vectors are normal
-		float b = dot(ray.direction,v) * 2;
+		float b = dot(ray.direction, v) * 2;
 		float c = dot(v, v) - (radius * radius);
 
 		float discriminent = (b * b) - 4 * c;
@@ -112,8 +120,15 @@ public:
 			return false;
 
 		discriminent = std::sqrt(discriminent);
-		float t0 = (-b + discriminent) / 2;
-		float t1 = (-b - discriminent) / 2;
+		float t0 = (-b + discriminent) * 0.5f;
+		float t1 = (-b - discriminent) * 0.5f;
+
+		if (t1 < 0 || t1 < 0)
+		{
+			//misses sphere
+			return false;
+		}
+
 
 		// make sure t0 is smaller than t1
 		if (t0 > t1)
@@ -121,12 +136,6 @@ public:
 			float temp = t0;
 			t0 = t1;
 			t1 = temp;
-		}
-
-		if (t1 < 0)
-		{
-			//misses sphere
-			return false;
 		}
 
 		// intersects at t1, and ray is inside sphere
@@ -139,7 +148,9 @@ public:
 			}
 
 			distance = t1;
-			surfel = getSurfaceElement(ray, distance);
+			if (updateSurfel) {
+				surfel = getSurfaceElement(ray, distance);
+			}
 			return true;
 		}
 		// intersects at t0
@@ -152,7 +163,9 @@ public:
 			}
 
 			distance = t0;
-			surfel = getSurfaceElement(ray, distance);
+			if (updateSurfel) {
+				surfel = getSurfaceElement(ray, distance);
+			}
 			return true;
 		}
 	}

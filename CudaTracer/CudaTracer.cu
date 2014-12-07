@@ -55,7 +55,7 @@ __global__ void computeEyeRaysKernel(Camera camera, Ray* rays, curandState* stat
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
 
-	Ray ray = computeEyeRay(x, y, DIM, DIM, camera, states[offset]);
+	Ray ray = computeEyeRay(x, y, camera, states[offset]);
 
 	ray.pixelOffset = offset;
 
@@ -128,9 +128,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 	//loop through spheres, finding intersection
 	for (size_t i = 0; i < data.numSpheres; i++)
 	{
-		Sphere &sphere = data.spheres[i];
-
-		if (sphere.intersectRay(ray, distance, surfel))
+		if (data.spheres[i].intersectRay(ray, distance, surfel))
 		{
 			intersection = 1;
 		}
@@ -138,9 +136,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 
 	for (size_t i = 0; i < data.numTriangles; i++)
 	{
-		Triangle &triangle = data.triangles[i];
-
-		if (triangle.intersectRay(ray, distance, surfel))
+		if (data.triangles[i].intersectRay(ray, distance, surfel))
 		{
 			intersection = 1;
 		}
@@ -322,9 +318,10 @@ vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, c
 
 
 __device__ 
-Ray computeEyeRay(int x, int y, int dimX, int dimY, const Camera& camera, curandState& state)
+Ray computeEyeRay(int x, int y, const Camera& camera, curandState& state)
 {
-	const float aspectRatio = float(dimY) / dimX;
+	const float aspectRatio = 1;//float(DIM) / DIM;
+	const float inverseDim = 1.0f / DIM;
 
 	float jitteredX = x + curand_uniform(&state);
 	float jitteredY = y + curand_uniform(&state);
@@ -336,8 +333,8 @@ Ray computeEyeRay(int x, int y, int dimX, int dimY, const Camera& camera, curand
 	const float s = -2 * tan(camera.fieldOfView * 0.5f);
 
 	// xPos / image.width() : map from 0 - 1 where the pixel is on the image
-	const vec3 start = vec3(((jitteredX / dimX) - 0.5f) * s,
-		1 * ((jitteredY / dimY) - 0.5f) * s * aspectRatio,
+	const vec3 start = vec3(((jitteredX * inverseDim) - 0.5f) * s,
+		1 * ((jitteredY * inverseDim) - 0.5f) * s * aspectRatio,
 		1.0f)
 		* camera.zNear;
 
@@ -398,7 +395,7 @@ vec3 getAreaLightPoint(const AreaLight& light, Triangle* triangles, curandState&
 //	float u2 = curand_uniform(&state) * u1;
 //	float weight0 = u1 - u2, weight1 = u2, weight2 = 1 - u1;
 
-	//this produced better results, and in practice cost very little extra computation
+	//this produced more even results, and in practice cost very little extra computation.
 	float u1 = curand_uniform(&state);
 	float u2 = curand_uniform(&state);
 	float u3 = curand_uniform(&state);
@@ -439,9 +436,7 @@ bool lineOfSight(const RendererData& data, const vec3& normal, const vec3& point
 	//TODO: More robust implementation
 	for (size_t i = 0; i < data.numSpheres; i++)
 	{
-		Sphere &sphere = data.spheres[i];
-
-		if (sphere.intersectRay(losRay, distance, surfel))
+		if (data.spheres[i].intersectRay(losRay, distance, surfel, false))
 		{
 			return false;
 		}
@@ -449,9 +444,7 @@ bool lineOfSight(const RendererData& data, const vec3& normal, const vec3& point
 
 	for (size_t i = 0; i < data.numTriangles; i++)
 	{
-		Triangle &triangle = data.triangles[i];
-
-		if (triangle.intersectRay(losRay, distance, surfel))
+		if (data.triangles[i].intersectRay(losRay, distance, surfel, false))
 		{
 			return false;
 		}
@@ -564,6 +557,7 @@ vec3 randomDirectionPhong(const vec3& w_o, float exponent, curandState& state)
 	return rot * sample;
 }
 
+__device__
 vec3 randomDirectionBeckmann(vec3 const& normal, float roughness, curandState& state)
 {
 	float theta = atan(-roughness * roughness * log(1.0f - curand_uniform(&state)));
@@ -607,7 +601,7 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	if (data->resetTicksThisFrame) {
 		data->lastResetTick = ticks;
 
-		clearPixels << <grids, threads >> >(pixels, data->totalPixelColors);
+		clearPixels <<<grids, threads>>>(pixels, data->totalPixelColors);
 
 		data->resetTicksThisFrame = false;
 	}
@@ -623,14 +617,14 @@ void generateFrame(uchar4 *pixels, void* dataBlock, int ticks)
 	//fire n rays per pixel
 	//number of iterations is only one if set to use ray tracing
 	unsigned int numIterations = data->usePathTracer ? data->maxIterations : 1;
-	for (unsigned int i = 0; i < numIterations && numRays != 0; i++) {
+	thrust::device_ptr<Ray> dev_ray_ptr(data->renderData.rays);
+	for (unsigned int i = 0; i < numIterations && numRays > 128; i++) {
 		dim3 rayGrids(numRays / numThreadsForRays);
 		pathTraceKernel << < rayGrids, rayThreads >> >(pixels, data->renderData, i, i == numIterations - 1);
 
 		if (i != numIterations - 1)
 		{
 			//Stream compaction
-			thrust::device_ptr<Ray> dev_ray_ptr(data->renderData.rays);
 			thrust::device_ptr<Ray> partitionRay = thrust::partition(dev_ray_ptr, dev_ray_ptr + numRays, ray_is_active());
 
 			numRays = partitionRay - dev_ray_ptr;			
@@ -719,6 +713,7 @@ int main(int argc, char *argv[])
 	data->renderData.defaultColor = defaultColor;
 	data->renderData.curandStates = curandStates;
 	data->totalPixelColors = totalPixelColors;
+	data->resetTicksThisFrame = true;
 
 	cudaEventCreate(&data->start);
 	cudaEventCreate(&data->stop);
@@ -805,7 +800,7 @@ void saveScreenshot(char filename[160], int x, int y)
 	int xa = x % 256;
 	int xb = (x - xa) / 256; int ya = y % 256;
 	int yb = (y - ya) / 256;//assemble the header
-	unsigned char header[18] = { 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, (char)xa, (char)xb, (char)ya, (char)yb, 24, 0 };
+	unsigned char header[18] = { 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, (unsigned char)xa, (unsigned char)xb, (unsigned char)ya, (unsigned char)yb, 24, 0 };
 	// write header and data to file
 	std::fstream File(filename, std::ios::out | std::ios::binary);
 	File.write(reinterpret_cast<char *>(header), sizeof (char)* 18);

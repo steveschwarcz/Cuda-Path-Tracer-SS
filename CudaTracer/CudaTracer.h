@@ -36,7 +36,7 @@ struct ProgramData
 	uint3 *totalPixelColors;			//A running total of the color in all pixels.  Used to average the results of ray tracing  
 	cudaEvent_t start, stop;			//For measuring timing
 	int lastResetTick;					//The last tick since the tracing was "reset"
-	unsigned int maxIterations = 5;		//The maximum number of bounces a ray can perform
+	unsigned int maxIterations = 10;	//The maximum number of bounces a ray can perform
 	bool resetTicksThisFrame;			//If true, the tracing must be reset this frame
 	bool usePathTracer = true;			//If true, then the path tracing algorithm is running.  If false, simple ray tracing is used instead
 };
@@ -47,7 +47,7 @@ bool moveCamera(Camera& camera, unsigned char key);
 void saveScreenshot(char filename[160], int x, int y);
 
 __device__
-Ray computeEyeRay(int x, int y, int dimX, int dimY, const Camera& camera, curandState& state);
+Ray computeEyeRay(int x, int y, const Camera& camera, curandState& state);
 
 __device__
 vec3 shade(const RendererData& data, const SurfaceElement& surfel, const Material& material, curandState& state);
