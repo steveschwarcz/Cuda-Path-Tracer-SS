@@ -18,8 +18,6 @@
 #include "CudaTracer.h"
 #pragma comment(lib, "glew32.lib")
 
-//TODO: These ought to be done differently
-
 //Initialize curand states
 __global__ void curandSetupKernel(curandState *state)
 {
@@ -433,7 +431,7 @@ bool lineOfSight(const RendererData& data, const vec3& normal, const vec3& point
 	//loop through all primitives, seeing if any intersections occur
 	SurfaceElement surfel;
 
-	//TODO: More robust implementation
+	//TODO: Acceleration Structure
 	for (size_t i = 0; i < data.numSpheres; i++)
 	{
 		if (data.spheres[i].intersectRay(losRay, distance, surfel, false))
