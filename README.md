@@ -1,10 +1,10 @@
 # Path Tracer SS
 
-<a href="http://www.youtube.com/watch?feature=player_embedded&v=http://youtu.be/0Z7Eo0BJaAg?list=UULmgOwUOPuGcU1MqSOJUbKg-7Z0
-" target="_blank"><img src="http://img.youtube.com/vi/http://youtu.be/0Z7Eo0BJaAg?list=UULmgOwUOPuGcU1MqSOJUbKg/hqdefault.jpg" 
+<a href="http://www.youtube.com/watch?feature=player_embedded&v=0Z7Eo0BJaAg-7Z0
+" target="_blank"><img src="http://img.youtube.com/vi/0Z7Eo0BJaAg/hqdefault.jpg" 
 alt="Cuda Path Tracer" width="240" height="180" border="10" /></a>
 
-[Youtube link](http://www.youtube.com/watch?feature=player_embedded&v=http://youtu.be/0Z7Eo0BJaAg?list=UULmgOwUOPuGcU1MqSOJUbKg-7Z0)
+[Youtube link](http://www.youtube.com/watch?feature=player_embedded&v=0Z7Eo0BJaAg-7Z0)
 
 This is a simple Path Tracer written in CUDA C/C++
 
