@@ -20,7 +20,9 @@ public:
 
 	void build();
 	void addRandomSpheres(const size_t numSpheres);
+	void addRandomGlassSpheres(const size_t numSpheres);
 	void addCornellBox(const float wallSize);
+	void addMirrorBox(const float wallSize);
 	void addDefinedSpheres(const float size);
 };
 

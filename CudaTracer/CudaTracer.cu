@@ -163,7 +163,7 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 		directRadiance += material.emmitance;
 
 		//calculate direct light, iff ray is not inside of primitive
-		bool inside = cosI < 0.0f;
+		bool inside = cosI <= 0.0f;
 		if (!inside) {
 			directRadiance += shade(data, surfel, material, localState);
 		}
@@ -174,9 +174,21 @@ __global__ void pathTraceKernel(uchar4 *pixels, RendererData data, int iteration
 		//--------------------------
 		vec3 indirectRadiance = isLastIteration ? vec3(1, 1, 1) : computeIndirectRadianceAndScatter(ray, surfel, material, cosI, distance, inside, localState);
 
+
+		//Apply Beer-Lambert law.  Has to be applied here because the distance needs to be the distance travelled while inside
+		if (inside)
+		{
+			ray.radiance1 *= vec3(
+				expf(-distance * material.absorption.x),
+				expf(-distance * material.absorption.y),
+				expf(-distance * material.absorption.z));
+		}
+
 		//save radiance
 		ray.radiance0 += ray.radiance1 * directRadiance;
 		ray.radiance1 *= indirectRadiance;
+
+		
 	}
 	else
 	{
@@ -296,15 +308,6 @@ vec3 computeIndirectRadianceAndScatter(Ray& ray, const SurfaceElement& surfel, c
 		{
 			refrRay(ray, surfel, cosI, sinT2, n);
 
-			//Apply Beer's law
-			if (inside)
-			{
-				return vec3(
-					expf(-distance * material.absorption.x),
-					expf(-distance * material.absorption.y),
-					expf(-distance * material.absorption.z));
-			}
-			//not inside, no need for absorption 
 			return vec3(1, 1, 1);
 		}
 	}

@@ -123,12 +123,16 @@ public:
 		float t0 = (-b + discriminent) * 0.5f;
 		float t1 = (-b - discriminent) * 0.5f;
 
-		if (t1 < 0 || t1 < 0)
+		if (t0 < 0 && t1 < 0)
 		{
 			//misses sphere
 			return false;
 		}
 
+		////TODO: REMOVE
+		//if (sqrt(dotVV) < radius) {
+		//	
+		//}
 
 		// make sure t0 is smaller than t1
 		if (t0 > t1)

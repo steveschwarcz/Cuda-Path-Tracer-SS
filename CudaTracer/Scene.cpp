@@ -22,11 +22,13 @@ void Scene::build() {
 	//scene.pointLightsVec.push_back(PointLight(vec3(2, 9.0f, -5), vec3(power, power, power)));
 
 	//add Spheres
-	addRandomSpheres(6);
+	addRandomSpheres(5);
+	addRandomGlassSpheres(15);
 //	addDefinedSpheres(4);
 
 	//add cornell box
-	addCornellBox(8);
+	//addCornellBox(8);
+	addMirrorBox(10);
 }
 
 /// <summary>
@@ -110,34 +112,102 @@ void Scene::addDefinedSpheres(const float size) {
 /// Adds a set of random spheres.  Because the randomness is unseeded, the same spheres will appear every time
 /// </summary>
 /// <param name="numSpheres">The number spheres.</param>
+void Scene::addRandomGlassSpheres(const size_t numSpheres)
+{
+	int matIdx = materialsVec.size();
+
+	//add matrials
+
+	////slightly blue glass
+	//materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+	//	vec3(1, 1, 1), INFINITY, 0.7f, 1.55f,
+	//	vec3(0.0f, 0.0f, 0), .7f));
+
+
+	//red glass
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+		vec3(1, 1, 1), INFINITY, 0.7f, 1.55f,
+		vec3(0, 0.75f, 0.75f), .7f));
+
+	//blue glass
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+		vec3(1, 1, 1), INFINITY, 0.7f, 1.55f,
+		vec3(0.75f, 0.75f, 0.f), .7f));
+
+	//green glass
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+		vec3(1, 1, 1), INFINITY, 0.7f, 1.55f,
+		vec3(0.75f, 0.f, 0.75f), .7f));
+
+	////green cook torrance glass
+	//materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+	//	vec3(1, 1, 1), INFINITY, 0.4f, 1.55f,
+	//	vec3(0.5f, 0, 0.5f), .7f));
+	//materialsVec[matIdx + 2].flags |= MAT_FLAG_COOK_TORRANCE;
+	//materialsVec[matIdx + 2].roughness = 0.2f;
+
+	////cloudy glass
+	//materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+	//	vec3(1, 1, 1), INFINITY, 0.7f, 1.55f,
+	//	vec3(0.3f, 0.0f, 0.f), .7f));
+
+
+	for (size_t i = 0; i < numSpheres; i++)
+	{
+		Sphere s;
+
+		rnd(1); rnd(1); rnd(1);
+
+		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(7.0f) - 9.0f);
+		s.radius = rnd(1.0f) + 0.2f;
+		s.materialIdx = matIdx + (i % 3);
+
+		spheresVec.push_back(s);
+	}
+}
+
+/// <summary>
+/// Adds a set of random spheres.  Because the randomness is unseeded, the same spheres will appear every time
+/// </summary>
+/// <param name="numSpheres">The number spheres.</param>
 void Scene::addRandomSpheres(const size_t numSpheres)
 {
 	int matIdx = materialsVec.size();
 
 	//add matrials
 
-	//slightly blue glass
-	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
-		vec3(1, 1, 1), INFINITY, 0.7f, 1.55f,
-		vec3(0.25f, 0.25f, 0), .7f));
-
-	//diffuse teal
-	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 1.0f), 0.7f));
-
-	//blue cook torrance
-	materialsVec.push_back(Material(vec3(0.4f, 0.1f, 1.0f), 0.1f, vec3(0.2f, 0.2f, 1.f), INFINITY, 0.6f, 2.7f));
-	materialsVec[matIdx + 2].flags |= MAT_FLAG_COOK_TORRANCE;
-	materialsVec[matIdx + 2].roughness = 0.7f;
-
-	//reflective
-	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.1f,
-	vec3(1, 1, 1), INFINITY, 0.6f, 4.0f));
-//	materialsVec[matIdx + 3].pureRefl = true;
+//	//slightly blue glass
+//	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.0f,
+//		vec3(1, 1, 1), INFINITY, 0.7f, 1.55f,
+//		vec3(0.25f, 0.25f, 0), .7f));
+//
+//	//diffuse teal
+//	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 1.0f), 0.7f));
+//
+//	//blue cook torrance
+//	materialsVec.push_back(Material(vec3(0.4f, 0.1f, 1.0f), 0.1f, vec3(0.2f, 0.2f, 1.f), INFINITY, 0.6f, 2.7f));
+//	materialsVec[matIdx + 2].flags |= MAT_FLAG_COOK_TORRANCE;
+//	materialsVec[matIdx + 2].roughness = 0.7f;
+//
+//	//reflective
+//	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.1f,
+//	vec3(1, 1, 1), INFINITY, 0.6f, 4.0f));
+////	materialsVec[matIdx + 3].pureRefl = true;
 
 	//red cook torrance
-	materialsVec.push_back(Material(vec3(1.0f, 0.1f, 0.1f), 0.1f, vec3(1.0f, 0.2f, 0.2f), INFINITY, 0.6f, 2.7f));
-	materialsVec[matIdx + 4].flags |= MAT_FLAG_COOK_TORRANCE;
-	materialsVec[matIdx + 4].roughness = 0.7f;
+	materialsVec.push_back(Material(vec3(1.0f, 0.1f, 0.1f), 0.1f, vec3(1.0f, 0.2f, 0.2f), INFINITY, 0.6f, 1.7f));
+	materialsVec[matIdx].flags |= MAT_FLAG_COOK_TORRANCE;
+	materialsVec[matIdx].roughness = 0.3f;
+
+	//blue cook torrance
+	materialsVec.push_back(Material(vec3(0.1f, 0.1f, 1.0f), 0.1f, vec3(0.2f, 0.2f, 1.0f), INFINITY, 0.6f, 1.7f));
+	materialsVec[matIdx + 1].flags |= MAT_FLAG_COOK_TORRANCE;
+	materialsVec[matIdx + 1].roughness = 0.1f;
+
+	//green cook torrance
+	materialsVec.push_back(Material(vec3(0.1f, 1.0f, 0.1f), 0.1f, vec3(0.2f, 1.f, 0.2f), INFINITY, 0.6f, 1.7f));
+	materialsVec[matIdx + 2].flags |= MAT_FLAG_COOK_TORRANCE;
+	materialsVec[matIdx + 2].roughness = 0.5f;
 
 	
 	for (size_t i = 0; i < numSpheres; i++)
@@ -146,9 +216,9 @@ void Scene::addRandomSpheres(const size_t numSpheres)
 
 		rnd(1); rnd(1);
 
-		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(5.0f) - 8.0f);
-		s.radius = rnd(0.5f) + 0.5f;
-		s.materialIdx = matIdx + (i % 5);
+		s.position = vec3(rnd(5.0f) - 2.5f, rnd(5.0f) - 2.5f, rnd(7.0f) - 9.0f);
+		s.radius = rnd(1.0f) + 0.2f;
+		s.materialIdx = matIdx + (i % 3);
 
 		spheresVec.push_back(s);
 	}
@@ -168,12 +238,12 @@ void Scene::addCornellBox(const float wallSize)
 
 	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 0.8f), 0.7f));	//white			(+0)
 	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.7f));	//red			(+1)
-	//materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f), 0.1f, vec3(1, 1, 1), INFINITY, .9f, 1.5f));	//green			(+2)
-	//materialsVec[matIdx + 2].pureRefl = true;
 	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.7f));	//green			(+2)
 
 
-	materialsVec.push_back(Material(vec3(10000.0f, 10000.0f, 10000.0f)));			//white light	(+3)
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f)));			//white light	(+3)
+	materialsVec.push_back(Material(vec3(0.0f, 0.0f, 0.0f), 0.0f, vec3(1, 1, 1), INFINITY, 0.8f, 5.8f));	//mirror		(+4)
+	//materialsVec[matIdx + 4].flags |= MAT_FLAG_PURE_REFLECTION;
 
 	const float offset = wallSize / 2;
 
@@ -203,6 +273,12 @@ void Scene::addCornellBox(const float wallSize)
 		scaleToWall;
 	addRectangularModel(trans, matIdx + 2);
 
+	//mirror
+	trans = translate(vec3(offset - .02f, 0, -offset)) *
+		rotate((glm::mediump_float) - 90, vec3(0, 1, 0)) *
+		(scale(vec3(wallSize - 2, wallSize - 2, wallSize - 2)));
+	addRectangularModel(trans, matIdx + 4);
+
 	//back wall
 	trans = translate(vec3(0, 0, -wallSize)) *
 		//		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
@@ -215,4 +291,81 @@ void Scene::addCornellBox(const float wallSize)
 		rotate((glm::mediump_float) 90, vec3(1, 0, 0)) *
 		scale(vec3(2.5f, 2.5f, 2.5f));
 	addAreaLight(trans, matIdx + 3, vec3(power, power, power));
+}
+
+
+/// <summary>
+/// Adds a mirror box of a given size, centered at 0, with no back.
+/// </summary>
+/// <param name="wallSize">Size of the walls.</param>
+void Scene::addMirrorBox(const float wallSize)
+{
+	using glm::translate;
+	using glm::scale;
+	using glm::rotate;
+
+	int matIdx = materialsVec.size();
+
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 0.8f), 0.7f));	//white			(+0)
+	materialsVec.push_back(Material(vec3(1.0f, 0.0f, 0.0f), 0.7f));	//red			(+1)
+	materialsVec.push_back(Material(vec3(0.0f, 1.0f, 0.0f), 0.7f));	//green			(+2)
+
+
+	materialsVec.push_back(Material(vec3(1.0f, 1.0f, 1.0f)));			//white light	(+3)
+	materialsVec.push_back(Material(vec3(0.0f, 0.0f, 0.0f), 0.0f, vec3(1, 1, 1), INFINITY, .9f, 5.8f));	//mirror		(+4)
+	materialsVec[matIdx + 4].flags |= MAT_FLAG_PURE_REFLECTION;
+	materialsVec.push_back(Material(vec3(1.0f, 0.6f, 1.0f)));			//violet light
+
+	const float offset = wallSize / 2;
+
+	const mat4 scaleToWall = scale(vec3(wallSize, wallSize, wallSize));
+
+	//floor
+	mat4 trans = translate(vec3(0, -offset, -offset)) *
+		rotate(-(glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx);
+
+	//ceiling
+	trans = translate(vec3(0, offset, -offset)) *
+		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx + 4);
+
+	//left wall
+	trans = translate(vec3(-offset + .2 * offset, 0, -offset)) *
+		rotate((glm::mediump_float)88, vec3(0, 1, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx + 4);
+
+	//right wall
+	trans = translate(vec3(offset, 0, -offset)) *
+		rotate((glm::mediump_float) - 90, vec3(0, 1, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx + 4);
+
+	//back wall
+	trans = translate(vec3(0, 0, -wallSize)) *
+		//		rotate((glm::mediump_float)90, vec3(1, 0, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx);
+
+	//front wall s
+	trans = translate(vec3(0, 0, 0)) *
+		rotate((glm::mediump_float)180, vec3(0, 1, 0)) *
+		scaleToWall;
+	addRectangularModel(trans, matIdx);
+
+	//light
+	float power = 400;
+	trans = translate(vec3(0, offset - 0.01f, -offset)) *
+		rotate((glm::mediump_float) 90, vec3(1, 0, 0)) *
+		scale(vec3(2.5f, 2.5f, 2.5f));
+	addAreaLight(trans, matIdx + 3, vec3(power / 4, power, power));
+
+
+	trans = translate(vec3(0, -offset + 0.01f, -offset)) *
+		rotate((glm::mediump_float) -90, vec3(1, 0, 0)) *
+		scale(vec3(1.5f, 1.5f, 1.5f));
+	addAreaLight(trans, matIdx + 5, vec3(power / 3, 0, power / 3));
 }
